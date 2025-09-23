@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+
+# Docker
+*.log
+*.pid
+*.sock
+*.swp
+*.tmp
+*.db
+.DS_Store
+
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+*$py.class
+
+# VSCode / PyCharm
+.vscode/
+.idea/
+
+# Docker volumes
+data/

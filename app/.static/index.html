@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Home Budget App</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 2em auto; }
+        input, button { padding: 0.5em; margin: 0.5em 0; width: 100%; }
+        .hidden { display: none; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Home Budget App</h1>
+
+    <div id="auth">
+        <h2>Login</h2>
+        <input type="text" id="loginUsername" placeholder="Username">
+        <input type="password" id="loginPassword" placeholder="Password">
+        <button onclick="login()">Login</button>
+        <p>or <a href="#" onclick="showRegister()">Register here</a></p>
+
+        <div id="registerDiv" class="hidden">
+            <h2>Register</h2>
+            <input type="text" id="regUsername" placeholder="Username">
+            <input type="text" id="regFullName" placeholder="Full Name">
+            <input type="password" id="regPassword" placeholder="Password">
+            <button onclick="register()">Register</button>
+            <p><a href="#" onclick="showLogin()">Back to Login</a></p>
+        </div>
+        <p class="error" id="authError"></p>
+    </div>
+
+    <div id="app" class="hidden">
+        <h2>Welcome, <span id="userName"></span></h2>
+        <p>Balance: $<span id="userBalance"></span></p>
+        <button onclick="showCategories()">Manage Categories</button>
+        <button onclick="showExpenses()">Manage Expenses</button>
+        <button onclick="showSummary()">View Summary</button>
+        <button onclick="logout()">Logout</button>
+
+        <div id="content"></div>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000";
+        let token = null;
+
+        function showRegister() {
+            document.getElementById("registerDiv").classList.remove("hidden");
+        }
+        function showLogin() {
+            document.getElementById("registerDiv").classList.add("hidden");
+        }
+
+        async function register() {
+            const username = document.getElementById("regUsername").value;
+            const full_name = document.getElementById("regFullName").value;
+            const password = document.getElementById("regPassword").value;
+            try {
+                const res = await fetch(`${API_URL}/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({username, password, full_name})
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                token = data.access_token;
+                await loadUser();
+            } catch (e) {
+                document.getElementById("authError").innerText = e;
+            }
+        }
+
+        async function login() {
+            const username = document.getElementById("loginUsername").value;
+            const password = document.getElementById("loginPassword").value;
+            try {
+                const form = new URLSearchParams();
+                form.append("username", username);
+                form.append("password", password);
+                const res = await fetch(`${API_URL}/token`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: form
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                token = data.access_token;
+                await loadUser();
+            } catch (e) {
+                document.getElementById("authError").innerText = e;
+            }
+        }
+
+        async function loadUser() {
+            const res = await fetch(`${API_URL}/me`, {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const user = await res.json();
+            document.getElementById("userName").innerText = user.username;
+            document.getElementById("userBalance").innerText = user.balance.toFixed(2);
+            document.getElementById("auth").classList.add("hidden");
+            document.getElementById("app").classList.remove("hidden");
+        }
+
+        function logout() {
+            token = null;
+            document.getElementById("auth").classList.remove("hidden");
+            document.getElementById("app").classList.add("hidden");
+            document.getElementById("content").innerHTML = "";
+        }
+
+        async function showCategories() {
+            const res = await fetch(`${API_URL}/categories`, { headers: { "Authorization": "Bearer " + token } });
+            const cats = await res.json();
+            let html = "<h3>Categories</h3><ul>";
+            cats.forEach(c => html += `<li>${c.name}</li>`);
+            html += "</ul>";
+            html += `<input id="newCat" placeholder="New category"><button onclick="addCategory()">Add</button>`;
+            document.getElementById("content").innerHTML = html;
+        }
+
+        async function addCategory() {
+            const name = document.getElementById("newCat").value;
+            const res = await fetch(`${API_URL}/categories`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+                body: JSON.stringify({name})
+            });
+            if (res.ok) showCategories();
+        }
+
+        async function showExpenses() {
+            const res = await fetch(`${API_URL}/expenses`, { headers: { "Authorization": "Bearer " + token } });
+            const expenses = await res.json();
+            let html = "<h3>Expenses</h3><ul>";
+            expenses.forEach(e => html += `<li>${e.description} - $${e.amount} - ${e.category.name}</li>`);
+            html += "</ul>";
+            html += `
+                <h4>Add Expense</h4>
+                <input id="expDesc" placeholder="Description">
+                <input id="expAmount" placeholder="Amount">
+                <input id="expCat" placeholder="Category ID">
+                <button onclick="addExpense()">Add Expense</button>
+            `;
+            document.getElementById("content").innerHTML = html;
+        }
+
+        async function addExpense() {
+            const description = document.getElementById("expDesc").value;
+            const amount = parseFloat(document.getElementById("expAmount").value);
+            const category_id = parseInt(document.getElementById("expCat").value);
+            const res = await fetch(`${API_URL}/expenses`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+                body: JSON.stringify({description, amount, category_id})
+            });
+            if (res.ok) showExpenses();
+        }
+
+        async function showSummary() {
+            const res = await fetch(`${API_URL}/aggregations/summary?period=month`, { headers: { "Authorization": "Bearer " + token } });
+            const data = await res.json();
+            let html = `<h3>Summary (${data.period})</h3>`;
+            html += `<p>Total Spent: $${data.total_spent}</p>`;
+            html += `<p>Total Income: $${data.total_income}</p>`;
+            html += `<p>Net: $${data.net}</p>`;
+            html += "<h4>Breakdown by category:</h4><ul>";
+            for (const [k,v] of Object.entries(data.breakdown_by_category)) {
+                html += `<li>${k} - Spent: $${v.spent}, Income: $${v.income}</li>`;
+            }
+            html += "</ul>";
+            document.getElementById("content").innerHTML = html;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Expenses</title>
+</head>
+<body>
+<h1>Expenses</h1>
+
+<h3>Add Expense</h3>
+<input id="desc" placeholder="Description">
+<input id="amount" type="number" placeholder="Amount">
+<select id="category"></select>
+<input id="date" type="date">
+<button onclick="createExpense()">Add</button>
+
+<h3>All Expenses</h3>
+<ul id="expenses_list"></ul>
+
+<script>
+let token = localStorage.getItem("token"); // save after login
+let categories = [];
+
+async function getCategories() {
+    const res = await fetch("/categories", { headers: { "Authorization": "Bearer " + token } });
+    categories = await res.json();
+    const sel = document.getElementById("category");
+    sel.innerHTML = "";
+    categories.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.text = c.name;
+        sel.appendChild(opt);
+    });
+}
+
+async function getExpenses() {
+    const res = await fetch("/expenses", { headers: { "Authorization": "Bearer " + token } });
+    const exps = await res.json();
+    const list = document.getElementById("expenses_list");
+    list.innerHTML = "";
+    exps.forEach(e => {
+        const li = document.createElement("li");
+        li.innerText = `${e.date} - ${e.description} - ${e.amount} - ${e.category.name}`;
+        list.appendChild(li);
+    });
+}
+
+async function createExpense() {
+    const description = document.getElementById("desc").value;
+    const amount = parseFloat(document.getElementById("amount").value);
+    const categoryId = document.getElementById("category").value;
+    const date = document.getElementById("date").value || null;
+
+    const res = await fetch("/expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({description, amount, categoryId, date})
+    });
+    const data = await res.json();
+    alert(JSON.stringify(data));
+    getExpenses();
+}
+
+getCategories();
+getExpenses();
+</script>
+</body>
+</html>

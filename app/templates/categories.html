@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Categories</title>
+</head>
+<body>
+<h1>Categories</h1>
+<input id="cat_name" placeholder="New Category">
+<button onclick="createCategory()">Add Category</button>
+<ul id="categories_list"></ul>
+
+<script>
+let token = localStorage.getItem("token"); // save after login
+
+async function getCategories() {
+    const token = localStorage.getItem("token"); // retrieve token
+    if (!token) { alert("Login first"); return; }
+
+    const res = await fetch("/api/categories", {
+        headers: { "Authorization": "Bearer " + token }
+    });
+    const data = await res.json();
+    console.log(data);
+}
+
+async function createCategory() {
+    const name = document.getElementById("cat_name").value;
+    const token = localStorage.getItem("token"); // make sure token exists
+    if (!token) { alert("Login first"); return; }
+
+    const res = await fetch("/api/categories", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token
+        },
+        body: JSON.stringify({name})
+    });
+    const data = await res.json();
+    alert(JSON.stringify(data));
+    getCategories(); // refresh list
+}
+
+
+getCategories();
+</script>
+</body>
+</html>

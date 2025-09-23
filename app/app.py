@@ -19,6 +19,34 @@ def get_db_connection():
         password=os.environ.get("POSTGRES_PASSWORD", "postgres")
     )
     return conn
+    
+    
+    
+    
+def apply_monthly_payday(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Get current balance and last_payday
+    cur.execute("SELECT balance, last_payday FROM users WHERE id = %s", (user_id,))
+    result = cur.fetchone()
+    balance, last_payday = result
+
+    today = datetime.date.today()
+    first_of_month = today.replace(day=1)
+
+    # Apply payday if last_payday is None or before this month
+    if not last_payday or last_payday < first_of_month:
+        balance += 2000
+        cur.execute(
+            "UPDATE users SET balance = %s, last_payday = %s WHERE id = %s",
+            (balance, today, user_id)
+        )
+        conn.commit()
+
+    cur.close()
+    conn.close()
+    return balance
 
 # ---------- AUTH ROUTES ----------
 
@@ -65,17 +93,219 @@ def login():
     conn.close()
 
     if user and check_password_hash(user[1], password):
-        access_token = create_access_token(identity=user[0], expires_delta=datetime.timedelta(hours=1))
+        access_token = create_access_token(identity=str(user[0]), expires_delta=datetime.timedelta(hours=1))
         return jsonify({"access_token": access_token}), 200
     else:
         return jsonify({"error": "Invalid credentials"}), 401
 
-# ---------- TEST PROTECTED ROUTE ----------
+
+
+@app.route("/categories")
+def categories_page():
+    return render_template("categories.html")
+
+
+# API route (JWT required)
+@app.route("/api/categories", methods=['POST'])
+@jwt_required()
+def api_create_category():
+    data = request.get_json()
+    name = data.get("name")
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM categories WHERE name = %s", (name,))
+    if cur.fetchone():
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Category already exists"}), 400
+
+    cur.execute("INSERT INTO categories (name) VALUES (%s) RETURNING id", (name,))
+    category_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"id": category_id, "name": name}), 201
+
+
+@app.route("/api/categories", methods=["GET"])
+@jwt_required()
+def api_get_categories():
+    """Get all global categories"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM categories ORDER BY name")
+    categories = [{"id": row[0], "name": row[1]} for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return jsonify(categories)
+
+@app.route('/categories/<int:id>', methods=['PUT'])
+@jwt_required()
+def update_category(id):
+    """Update global category name"""
+    data = request.get_json()
+    name = data.get("name")
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE categories SET name = %s WHERE id = %s RETURNING id", (name, id))
+    if cur.fetchone() is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Category not found"}), 404
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"id": id, "name": name})
+
+@app.route('/categories/<int:id>', methods=['DELETE'])
+@jwt_required()
+def delete_category(id):
+    """Delete a global category"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM categories WHERE id = %s RETURNING id", (id,))
+    if cur.fetchone() is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Category not found"}), 404
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": "Category deleted"})
+    
+    
+    
+from decimal import Decimal
+
+@app.route('/expenses', methods=['POST'])
+@jwt_required()
+def create_expense():
+    """Create an expense for a user with a category (balance can go negative)"""
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    amount = data.get("amount")
+    description = data.get("description")
+    category_id = data.get("categoryId")
+    expense_date = data.get("date", str(datetime.date.today()))
+
+    # Validate input
+    if not all([amount, description, category_id]):
+        return jsonify({"error": "Amount, description, and categoryId are required"}), 400
+
+    # Convert amount to Decimal
+    try:
+        amount = Decimal(str(amount))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Amount must be a number"}), 400
+
+    # Parse date
+    try:
+        expense_date = datetime.date.fromisoformat(expense_date)
+    except ValueError:
+        return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        # Apply monthly payday first
+        balance = apply_monthly_payday(user_id)  # should return Decimal
+
+        # Check if category exists
+        cur.execute("SELECT id, name FROM categories WHERE id = %s", (category_id,))
+        cat = cur.fetchone()
+        if not cat:
+            return jsonify({"error": "Category not found"}), 404
+
+        # Deduct expense from balance (can go negative)
+        balance -= amount
+        cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
+
+        # Insert expense
+        cur.execute(
+            "INSERT INTO expenses (description, amount, category_id, user_id, date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (description, amount, category_id, user_id, expense_date)
+        )
+        expense_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    return jsonify({
+        "id": expense_id,
+        "description": description,
+        "amount": float(amount),  # convert for JSON
+        "date": str(expense_date),
+        "category": {"id": cat[0], "name": cat[1]},
+        "balance": float(balance)
+    }), 201
+
+@app.route('/expenses', methods=['GET'])
+@jwt_required()
+def get_expenses():
+    """Get all expenses for the current user"""
+    user_id = get_jwt_identity()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT e.id, e.description, e.amount, e.date, c.id, c.name
+        FROM expenses e
+        JOIN categories c ON e.category_id = c.id
+        WHERE e.user_id = %s
+        ORDER BY e.date DESC
+    """, (user_id,))
+    expenses = []
+    for row in cur.fetchall():
+        expenses.append({
+            "id": row[0],
+            "description": row[1],
+            "amount": float(row[2]),
+            "date": row[3].isoformat(),
+            "category": {"id": row[4], "name": row[5]}
+        })
+    cur.close()
+    conn.close()
+    return jsonify(expenses)
+
 @app.route("/me", methods=["GET"])
 @jwt_required()
 def me():
-    current_user_id = get_jwt_identity()
-    return jsonify({"user_id": current_user_id, "message": "You are authenticated!"})
+    user_id = get_jwt_identity()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Get current user balance and last_payday
+    cur.execute("SELECT balance, last_payday FROM users WHERE id = %s", (user_id,))
+    row = cur.fetchone()
+    balance = row[0] or 0
+    last_payday = row[1]
+
+    today = datetime.date.today()
+
+    # Apply monthly payday if needed
+    if not last_payday or last_payday.month < today.month or last_payday.year < today.year:
+        balance += 2000
+        cur.execute("UPDATE users SET balance = %s, last_payday = %s WHERE id = %s",
+                    (balance, today.replace(day=1), user_id))
+        conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "user_id": user_id,
+        "balance": float(balance),
+        "message": "You are authenticated!"
+    })
+
 
 # ---------- DEFAULT ----------
 @app.route("/")

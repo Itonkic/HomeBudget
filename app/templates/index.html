@@ -1,10 +1,75 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Flask + Postgres</title>
+    <meta charset="UTF-8">
+    <title>Home Budget App</title>
 </head>
 <body>
-    <h1>Database Value</h1>
-    <p>{{ something }}: {{ value }}</p>
+    <h1>Home Budget App</h1>
+
+    <h2>Register</h2>
+    <input id="reg_username" placeholder="Username">
+    <input id="reg_password" type="password" placeholder="Password">
+    <button onclick="register()">Register</button>
+    <p id="reg_msg"></p>
+
+    <h2>Login</h2>
+    <input id="login_username" placeholder="Username">
+    <input id="login_password" type="password" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <p id="login_msg"></p>
+
+    <h2>Balance</h2>
+    <button onclick="getBalance()">Show Balance</button>
+    <p id="balance"></p>
+
+<script>
+let token = "";
+
+async function register() {
+    const username = document.getElementById("reg_username").value;
+    const password = document.getElementById("reg_password").value;
+    const res = await fetch("/register", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({username, password})
+    });
+    const data = await res.json();
+    document.getElementById("reg_msg").innerText = JSON.stringify(data);
+}
+
+async function login() {
+    const username = document.getElementById("login_username").value;
+    const password = document.getElementById("login_password").value;
+
+    const res = await fetch("/login", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({username, password})
+    });
+
+    const data = await res.json();
+
+    if (data.access_token) {
+        localStorage.setItem("token", data.access_token); // save token
+        window.location.href = "/categories"; // redirect
+    } else {
+        alert("Login failed: " + JSON.stringify(data));
+    }
+}
+
+
+async function getBalance() {
+    const token = localStorage.getItem("token");
+    if (!token) { alert("Login first"); return; }
+
+    const res = await fetch("/me", {
+        headers: { "Authorization": "Bearer " + token }
+    });
+    const data = await res.json();
+    document.getElementById("balance").innerText = "Balance: " + data.balance;
+}
+
+</script>
 </body>
 </html>

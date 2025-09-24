@@ -6,9 +6,12 @@ from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
 import datetime
+from flasgger import Swagger
+
 
 app = Flask(__name__)
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "super-secret")  
+swagger = Swagger(app)
 jwt = JWTManager(app)
 
 def get_db_connection():
@@ -50,9 +53,38 @@ def apply_monthly_payday(user_id):
 
 # ---------- AUTH ROUTES ----------
 
+from flask import request, jsonify
+from werkzeug.security import generate_password_hash
+from psycopg2.errors import UniqueViolation
+
 @app.route("/register", methods=["POST"])
 def register():
-    data = request.get_json()
+    """
+    Register a new user.
+
+    ---
+    tags:
+      - Auth
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                example: "john_doe"
+              password:
+                type: string
+                example: "secret123"
+    responses:
+      201:
+        description: User registered successfully
+      400:
+        description: Missing username or password / User already exists
+    """
+    data = request.get_json() or {}
     username = data.get("username")
     password = data.get("password")
 
@@ -64,16 +96,28 @@ def register():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, hashed_pw))
+        # Check if user already exists
+        cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+        if cur.fetchone():
+            return jsonify({"error": "Username already exists"}), 400
+
+        cur.execute(
+            "INSERT INTO users (username, password) VALUES (%s, %s)",
+            (username, hashed_pw)
+        )
         conn.commit()
+    except UniqueViolation:
+        conn.rollback()
+        return jsonify({"error": "Username already exists"}), 400
     except Exception as e:
         conn.rollback()
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": "Database error"}), 500
     finally:
         cur.close()
         conn.close()
 
     return jsonify({"message": "User registered successfully"}), 201
+
 
 
 @app.route("/login", methods=["POST"])
@@ -450,10 +494,10 @@ def aggregation():
     cur.execute("SELECT key, value FROM TBA_SIO")
     vars_dict = {row[0]: float(row[1]) for row in cur.fetchall()}
 
-    net_income = vars_dict.get("Me", 2000)
+    net_income = vars_dict.get("Me", 100)
     housing = vars_dict.get("House", 600)
     utilities = vars_dict.get("Utilities", 0)
-    insurance = vars_dict.get("Insurance", 0)
+    insurance = vars_dict.get("Insurance", 100000)
     subscriptions = vars_dict.get("Subscriptions", 0)
     debt = vars_dict.get("DebtPayments", 0)
     discretionary = vars_dict.get("Discretionary", 0)

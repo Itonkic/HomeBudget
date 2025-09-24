@@ -1,75 +1,175 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Home Budget App</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flask API Tester</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 </head>
-<body>
-    <h1>Home Budget App</h1>
+<body class="p-4">
 
-    <h2>Register</h2>
-    <input id="reg_username" placeholder="Username">
-    <input id="reg_password" type="password" placeholder="Password">
-    <button onclick="register()">Register</button>
-    <p id="reg_msg"></p>
+  <h1 class="mb-4">Flask API Tester</h1>
 
-    <h2>Login</h2>
-    <input id="login_username" placeholder="Username">
-    <input id="login_password" type="password" placeholder="Password">
-    <button onclick="login()">Login</button>
-    <p id="login_msg"></p>
+  <!-- JWT token input -->
+  <div class="mb-3">
+    <label for="jwtToken" class="form-label">JWT Token:</label>
+    <input type="text" id="jwtToken" class="form-control" placeholder="Paste your JWT token here">
+  </div>
 
-    <h2>Balance</h2>
-    <button onclick="getBalance()">Show Balance</button>
-    <p id="balance"></p>
+  <!-- Section for each route -->
+  <div class="mb-4">
+    <h4>/register</h4>
+    <input type="text" id="regUsername" placeholder="Username" class="form-control mb-1">
+    <input type="password" id="regPassword" placeholder="Password" class="form-control mb-1">
+    <button class="btn btn-primary" onclick="callRegister()">Register</button>
+  </div>
 
+  <div class="mb-4">
+    <h4>/login</h4>
+    <input type="text" id="loginUsername" placeholder="Username" class="form-control mb-1">
+    <input type="password" id="loginPassword" placeholder="Password" class="form-control mb-1">
+    <button class="btn btn-primary" onclick="callLogin()">Login</button>
+  </div>
+
+  <div class="mb-4">
+    <h4>/me</h4>
+    <button class="btn btn-info" onclick="callMe()">Get My Info</button>
+  </div>
+
+  <div class="mb-4">
+    <h4>/categories (POST)</h4>
+    <input type="text" id="catName" placeholder="Category Name" class="form-control mb-1">
+    <button class="btn btn-success" onclick="callCreateCategory()">Create Category</button>
+  </div>
+
+  <div class="mb-4">
+    <h4>/api/categories (GET)</h4>
+    <button class="btn btn-secondary" onclick="callGetCategories()">Get Categories</button>
+  </div>
+
+  <div class="mb-4">
+    <h4>/expenses (POST)</h4>
+    <input type="number" id="expAmount" placeholder="Amount" class="form-control mb-1">
+    <input type="text" id="expDesc" placeholder="Description" class="form-control mb-1">
+    <input type="number" id="expCatId" placeholder="Category ID" class="form-control mb-1">
+    <input type="date" id="expDate" class="form-control mb-1">
+    <button class="btn btn-warning" onclick="callCreateExpense()">Create Expense</button>
+  </div>
+
+  <div class="mb-4">
+    <h4>/aggregation</h4>
+    <select id="aggPeriod" class="form-select mb-1">
+      <option value="month">Month</option>
+      <option value="quarter">Quarter</option>
+      <option value="year">Year</option>
+    </select>
+    <button class="btn btn-dark" onclick="callAggregation()">Get Aggregation</button>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal fade" id="responseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">API Response</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <pre id="modalContent"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-let token = "";
+  const modal = new bootstrap.Modal(document.getElementById('responseModal'));
+  
+  function showResponse(data) {
+    document.getElementById('modalContent').textContent = JSON.stringify(data, null, 2);
+    modal.show();
+  }
 
-async function register() {
-    const username = document.getElementById("reg_username").value;
-    const password = document.getElementById("reg_password").value;
-    const res = await fetch("/register", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({username, password})
-    });
-    const data = await res.json();
-    document.getElementById("reg_msg").innerText = JSON.stringify(data);
-}
+  function getJWTHeader() {
+    const token = document.getElementById('jwtToken').value;
+    return token ? { Authorization: 'Bearer ' + token } : {};
+  }
 
-async function login() {
-    const username = document.getElementById("login_username").value;
-    const password = document.getElementById("login_password").value;
-
-    const res = await fetch("/login", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({username, password})
-    });
-
-    const data = await res.json();
-
-    if (data.access_token) {
-        localStorage.setItem("token", data.access_token); // save token
-        window.location.href = "/categories"; // redirect
-    } else {
-        alert("Login failed: " + JSON.stringify(data));
+  async function callRegister() {
+    const username = document.getElementById('regUsername').value;
+    const password = document.getElementById('regPassword').value;
+    try {
+      const res = await axios.post('/register', { username, password });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
     }
-}
+  }
 
+  async function callLogin() {
+    const username = document.getElementById('loginUsername').value;
+    const password = document.getElementById('loginPassword').value;
+    try {
+      const res = await axios.post('/login', { username, password });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
+    }
+  }
 
-async function getBalance() {
-    const token = localStorage.getItem("token");
-    if (!token) { alert("Login first"); return; }
+  async function callMe() {
+    try {
+      const res = await axios.get('/me', { headers: getJWTHeader() });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
+    }
+  }
 
-    const res = await fetch("/me", {
-        headers: { "Authorization": "Bearer " + token }
-    });
-    const data = await res.json();
-    document.getElementById("balance").innerText = "Balance: " + data.balance;
-}
+  async function callCreateCategory() {
+    const name = document.getElementById('catName').value;
+    try {
+      const res = await axios.post('/api/categories', { name }, { headers: getJWTHeader() });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
+    }
+  }
+
+  async function callGetCategories() {
+    try {
+      const res = await axios.get('/api/categories', { headers: getJWTHeader() });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
+    }
+  }
+
+  async function callCreateExpense() {
+    const amount = document.getElementById('expAmount').value;
+    const description = document.getElementById('expDesc').value;
+    const categoryId = document.getElementById('expCatId').value;
+    const date = document.getElementById('expDate').value;
+    try {
+      const res = await axios.post('/expenses', { amount, description, categoryId, date }, { headers: getJWTHeader() });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
+    }
+  }
+
+  async function callAggregation() {
+    const period = document.getElementById('aggPeriod').value;
+    try {
+      const res = await axios.get('/aggregation?period=' + period, { headers: getJWTHeader() });
+      showResponse(res.data);
+    } catch (err) {
+      showResponse(err.response?.data || err.message);
+    }
+  }
 
 </script>
+
 </body>
 </html>

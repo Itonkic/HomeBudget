@@ -194,7 +194,7 @@ def create_expense():
     description = data.get("description")
     category_id = data.get("categoryId")
     expense_date = data.get("date", str(datetime.date.today()))
-
+    print("ADKLGHLKJHLKJHLKJIH")
     # Validate input
     if not all([amount, description, category_id]):
         return jsonify({"error": "Amount, description, and categoryId are required"}), 400
@@ -250,26 +250,54 @@ def create_expense():
 @app.route('/expenses', methods=['GET'])
 @jwt_required()
 def get_expenses():
-    """Get all expenses for the current user"""
     user_id = get_jwt_identity()
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
+    
+    # Convert and validate parameters
+    category_id = request.args.get('categoryId', type=int)
+    min_amount = request.args.get('minAmount', type=float)
+    max_amount = request.args.get('maxAmount', type=float)
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+    
+    print("Filters received:", category_id, min_amount, max_amount, start_date, end_date, flush=True)
+    import logging
+
+    logging.basicConfig(level=logging.DEBUG)  # DEBUG level to see everything
+    logging.debug(f"Filters received: {category_id}, {min_amount}, {max_amount}, {start_date}, {end_date}")
+
+    query = """
         SELECT e.id, e.description, e.amount, e.date, c.id, c.name
         FROM expenses e
         JOIN categories c ON e.category_id = c.id
         WHERE e.user_id = %s
-        ORDER BY e.date DESC
-    """, (user_id,))
-    expenses = []
-    for row in cur.fetchall():
-        expenses.append({
-            "id": row[0],
-            "description": row[1],
-            "amount": float(row[2]),
-            "date": row[3].isoformat(),
-            "category": {"id": row[4], "name": row[5]}
-        })
+    """
+    params = [user_id]
+
+    if category_id is not None:
+        query += " AND e.category_id = %s"
+        params.append(category_id)
+    if min_amount is not None:
+        query += " AND e.amount >= %s"
+        params.append(min_amount)
+    if max_amount is not None:
+        query += " AND e.amount <= %s"
+        params.append(max_amount)
+    if start_date:
+        query += " AND e.date >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND e.date <= %s"
+        params.append(end_date)
+
+    query += " ORDER BY e.date DESC"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(query, tuple(params))
+    expenses = [{
+        "id": r[0], "description": r[1], "amount": float(r[2]),
+        "date": r[3].isoformat(), "category": {"id": r[4], "name": r[5]}
+    } for r in cur.fetchall()]
     cur.close()
     conn.close()
     return jsonify(expenses)
@@ -314,6 +342,6 @@ def index():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)
 
 

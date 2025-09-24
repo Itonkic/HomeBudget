@@ -6,8 +6,7 @@ curl -X POST http://localhost:5000/register -H "Content-Type: application/json" 
 
 Test Login
 CMD
-curl -X POST http://localhost:5000/login -H "Content-Type: application/json" -d "{\"username\":\"alice\", \"password\":\"mypassword\"}"
-
+curl -X POST http://localhost:5000/login -H "Content-Type: application/json" -d "{\"username\":\"bebe\", \"password\":\"123\"}"
 
 Test Expenses
 curl -X POST http://127.0.0.1:5000/expenses -H "Content-Type: application/json" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODYzMDI3NSwianRpIjoiOTM5ZmQ2YzItYjgwYy00NzM4LWFlOGItYTRhNzVhMmNhMWY5IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2MzAyNzUsImNzcmYiOiIwMzI3YWRmNC0zZWQwLTRkMTgtYWUwMC1iMjlmYjg1ODE0ODciLCJleHAiOjE3NTg2MzM4NzV9.1Z_1BgdHlGich5cNLMEo3_hcJ4oYRI1flTYjzXvBaVQ" -d "{\"description\":\"Groceries\",\"amount\":123.45,\"categoryId\":1,\"date\":\"2025-09-23\"}"

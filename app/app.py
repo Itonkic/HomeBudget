@@ -213,7 +213,6 @@ def login():
 
 
 
-# API route (JWT required)
 @app.route("/api/categories", methods=['POST'])
 @jwt_required()
 def api_create_category():
@@ -267,17 +266,26 @@ def api_create_category():
 
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM categories WHERE name = %s", (name,))
-    if cur.fetchone():
+
+    try:
+        # Check if category already exists
+        cur.execute("SELECT id FROM categories WHERE name = %s", (name,))
+        if cur.fetchone():
+            return jsonify({"error": "Category already exists"}), 400
+
+        # Ensure sequence is in sync
+        cur.execute(
+            "SELECT setval('categories_id_seq', COALESCE((SELECT MAX(id) FROM categories), 0))"
+        )
+
+        # Insert new category
+        cur.execute("INSERT INTO categories (name) VALUES (%s) RETURNING id", (name,))
+        category_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
         cur.close()
         conn.close()
-        return jsonify({"error": "Category already exists"}), 400
 
-    cur.execute("INSERT INTO categories (name) VALUES (%s) RETURNING id", (name,))
-    category_id = cur.fetchone()[0]
-    conn.commit()
-    cur.close()
-    conn.close()
     return jsonify({"id": category_id, "name": name}), 201
 
 

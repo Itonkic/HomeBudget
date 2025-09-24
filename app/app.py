@@ -258,12 +258,6 @@ def get_expenses():
     max_amount = request.args.get('maxAmount', type=float)
     start_date = request.args.get('startDate')
     end_date = request.args.get('endDate')
-    
-    print("Filters received:", category_id, min_amount, max_amount, start_date, end_date, flush=True)
-    import logging
-
-    logging.basicConfig(level=logging.DEBUG)  # DEBUG level to see everything
-    logging.debug(f"Filters received: {category_id}, {min_amount}, {max_amount}, {start_date}, {end_date}")
 
     query = """
         SELECT e.id, e.description, e.amount, e.date, c.id, c.name
@@ -334,7 +328,94 @@ def me():
         "message": "You are authenticated!"
     })
 
+# ---------- EXPENSES UPDATE ----------
+@app.route('/expenses/<int:expense_id>', methods=['PUT'])
+@jwt_required()
+def update_expense(expense_id):
+    """Update an existing expense (only description, amount, category, date)"""
+    user_id = get_jwt_identity()
+    data = request.get_json()
 
+    amount = data.get("amount")
+    description = data.get("description")
+    category_id = data.get("categoryId")
+    expense_date = data.get("date")
+
+    # Validate at least one field is present
+    if not any([amount, description, category_id, expense_date]):
+        return jsonify({"error": "At least one field is required to update"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Make sure expense belongs to this user
+    cur.execute("SELECT id FROM expenses WHERE id = %s AND user_id = %s", (expense_id, user_id))
+    if cur.fetchone() is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Expense not found"}), 404
+
+    # Build update query dynamically
+    fields, values = [], []
+    if description:
+        fields.append("description = %s")
+        values.append(description)
+    if amount:
+        fields.append("amount = %s")
+        values.append(amount)
+    if category_id:
+        fields.append("category_id = %s")
+        values.append(category_id)
+    if expense_date:
+        try:
+            expense_date = datetime.date.fromisoformat(expense_date)
+        except ValueError:
+            return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
+        fields.append("date = %s")
+        values.append(expense_date)
+
+    values.append(expense_id)
+    values.append(user_id)
+
+    cur.execute(
+        f"UPDATE expenses SET {', '.join(fields)} WHERE id = %s AND user_id = %s RETURNING id",
+        tuple(values)
+    )
+    updated = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not updated:
+        return jsonify({"error": "Expense not found"}), 404
+
+    return jsonify({"message": "Expense updated", "id": expense_id}), 200
+
+
+# ---------- EXPENSES DELETE ----------
+@app.route('/expenses/<int:expense_id>', methods=['DELETE'])
+@jwt_required()
+def delete_expense(expense_id):
+    """Delete an expense"""
+    user_id = get_jwt_identity()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM expenses WHERE id = %s AND user_id = %s RETURNING id", (expense_id, user_id))
+    deleted = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not deleted:
+        return jsonify({"error": "Expense not found"}), 404
+
+    return jsonify({"message": "Expense deleted", "id": expense_id}), 200
+    
+    
+    
+    
+    
 # ---------- DEFAULT ----------
 @app.route("/")
 def index():

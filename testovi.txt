@@ -1,0 +1,75 @@
+Test register
+
+
+TOKEN
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODcxMTUzOSwianRpIjoiZTE2MTk5ZmQtNzQ4Zi00YzgxLWFlZjItZjgxOWEwNzZiMWVmIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg3MTE1MzksImNzcmYiOiI0M2U3MTI1Yy1iZmYyLTQyN2ItYWZiZS05YmI0ZmI4M2NlYmUiLCJleHAiOjE3NTg3MTUxMzl9._63plQK00nBQVEQ_iMLzFotIbclghtM_0YeEh92Y30k
+
+
+
+
+
+
+Test Register
+curl -X POST http://localhost:5000/register -H "Content-Type: application/json" -d "{\"username\":\"alice\", \"password\":\"mypassword\"}"
+
+
+
+Test Login
+CMD
+curl -X POST http://localhost:5000/login -H "Content-Type: application/json" -d "{\"username\":\"alice\", \"password\":\"mypassword\"}"
+
+
+Test Expenses
+curl -X POST http://127.0.0.1:5000/expenses -H "Content-Type: application/json" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODYzMDI3NSwianRpIjoiOTM5ZmQ2YzItYjgwYy00NzM4LWFlOGItYTRhNzVhMmNhMWY5IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2MzAyNzUsImNzcmYiOiIwMzI3YWRmNC0zZWQwLTRkMTgtYWUwMC1iMjlmYjg1ODE0ODciLCJleHAiOjE3NTg2MzM4NzV9.1Z_1BgdHlGich5cNLMEo3_hcJ4oYRI1flTYjzXvBaVQ" -d "{\"description\":\"Groceries\",\"amount\":123.45,\"categoryId\":1,\"date\":\"2025-09-23\"}"
+
+
+Get all categories
+
+curl -X GET http://localhost:5000/api/categories -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY"
+
+
+
+Create a category
+curl -X POST http://localhost:5000/api/categories -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY" -H "Content-Type: application/json" -d "{\"name\":\"NewCategory\"}"
+
+
+Update a category
+curl -X PUT http://localhost:5000/categories/1 -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY" -H "Content-Type: application/json" -d "{\"name\":\"UpdatedCategory2\"}"
+
+
+Delete a category
+curl -X DELETE http://localhost:5000/categories/1 -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY"
+
+
+
+
+Create an expense
+C:\Users\ivan.tonkic\Desktop\Homebudget>curl -X POST http://localhost:5000/expenses -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY" -H "Content-Type: application/json" -d "{\"amount\":100.50,\"description\":\"Lunch\",\"categoryId\":1,\"date\":\"2025-09-23\"}"
+{"error":"Category not found"}
+
+C:\Users\ivan.tonkic\Desktop\Homebudget>curl -X POST http://localhost:5000/expenses -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY" -H "Content-Type: application/json" -d "{\"amount\":100.50,\"description\":\"Car\",\"categoryId\":2,\"date\":\"2025-09-23\"}"
+{"amount":100.5,"balance":1675.55,"category":{"id":2,"name":"Car"},"date":"2025-09-23","description":"Car","id":3}
+
+
+
+Get all expenses
+C:\Users\ivan.tonkic\Desktop\Homebudget>curl -X GET http://localhost:5000/expenses -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODcxMTUzOSwianRpIjoiZTE2MTk5ZmQtNzQ4Zi00YzgxLWFlZjItZjgxOWEwNzZiMWVmIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg3MTE1MzksImNzcmYiOiI0M2U3MTI1Yy1iZmYyLTQyN2ItYWZiZS05YmI0ZmI4M2NlYmUiLCJleHAiOjE3NTg3MTUxMzl9._63plQK00nBQVEQ_iMLzFotIbclghtM_0YeEh92Y30k"
+[{"amount":100.5,"category":{"id":2,"name":"Car"},"date":"2025-09-23","description":"Car","id":2},{"amount":100.5,"category":{"id":2,"name":"Car"},"date":"2025-09-23","description":"Car","id":3},{"amount":100.5,"category":{"id":3,"name":"Accommodation"},"date":"2025-09-23","description":"Casdar","id":4}]
+
+
+
+Kategorije filter
+curl -X GET "http://localhost:5000/expenses" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODY5OTc2NywianRpIjoiOTc1Y2Y0Y2YtOWFhNC00OGNhLWEyYTItZTljMWVjMDA3OGE3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg2OTk3NjcsImNzcmYiOiI1Y2JkOTE5OC0yMGRmLTRiNjAtYjMyMC0zYWVmOThjNzIxZmQiLCJleHAiOjE3NTg3MDMzNjd9.hYfTvZ9I8u7t1o-Wc-QHET8ditfwTnxW-85LqcavOZY"
+
+
+
+
+edit expense
+curl -X PUT http://localhost:5000/expenses/1 -H "Content-Type: application/json" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODcxMTUzOSwianRpIjoiZTE2MTk5ZmQtNzQ4Zi00YzgxLWFlZjItZjgxOWEwNzZiMWVmIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg3MTE1MzksImNzcmYiOiI0M2U3MTI1Yy1iZmYyLTQyN2ItYWZiZS05YmI0ZmI4M2NlYmUiLCJleHAiOjE3NTg3MTUxMzl9._63plQK00nBQVEQ_iMLzFotIbclghtM_0YeEh92Y30k"   -d "{\"amount\": 99.99}"
+
+
+
+delete expense
+curl -X DELETE http://localhost:5000/expenses/1 -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1ODcxMTUzOSwianRpIjoiZTE2MTk5ZmQtNzQ4Zi00YzgxLWFlZjItZjgxOWEwNzZiMWVmIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjEiLCJuYmYiOjE3NTg3MTE1MzksImNzcmYiOiI0M2U3MTI1Yy1iZmYyLTQyN2ItYWZiZS05YmI0ZmI4M2NlYmUiLCJleHAiOjE3NTg3MTUxMzl9._63plQK00nBQVEQ_iMLzFotIbclghtM_0YeEh92Y30k"
+
+

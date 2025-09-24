@@ -60,30 +60,57 @@ from psycopg2.errors import UniqueViolation
 @app.route("/register", methods=["POST"])
 def register():
     """
-    Register a new user.
-
+    Register a new user
     ---
     tags:
       - Auth
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              username:
-                type: string
-                example: "john_doe"
-              password:
-                type: string
-                example: "secret123"
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              example: john_doe
+            password:
+              type: string
+              example: mypassword123
     responses:
       201:
         description: User registered successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: User registered successfully
       400:
-        description: Missing username or password / User already exists
+        description: Bad request (missing fields or username exists)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: Username already exists
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: Database error
     """
+
     data = request.get_json() or {}
     username = data.get("username")
     password = data.get("password")
@@ -120,8 +147,48 @@ def register():
 
 
 
+
 @app.route("/login", methods=["POST"])
 def login():
+    """
+    User login
+    ---
+    tags:
+      - Auth
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              example: alice
+            password:
+              type: string
+              example: mypassword
+    responses:
+      200:
+        description: Login successful
+        schema:
+          type: object
+          properties:
+            access_token:
+              type: string
+      400:
+        description: Missing username or password
+      401:
+        description: Invalid credentials
+    """
+
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
@@ -144,15 +211,55 @@ def login():
 
 
 
-@app.route("/categories")
-def categories_page():
-    return render_template("categories.html")
 
 
 # API route (JWT required)
 @app.route("/api/categories", methods=['POST'])
 @jwt_required()
 def api_create_category():
+    """
+    Create a new category
+    ---
+    tags:
+      - Categories
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+              example: "Groceries"
+    responses:
+      201:
+        description: Category created successfully
+        schema:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 1
+            name:
+              type: string
+              example: "Groceries"
+      400:
+        description: Bad request (missing name or category exists)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Category already exists"
+    """
+
     data = request.get_json()
     name = data.get("name")
     if not name:
@@ -177,6 +284,37 @@ def api_create_category():
 @app.route("/api/categories", methods=["GET"])
 @jwt_required()
 def api_get_categories():
+    """
+    Get all categories
+    ---
+    tags:
+      - Categories
+    produces:
+      - application/json
+    responses:
+      200:
+        description: List of all categories
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                example: 1
+              name:
+                type: string
+                example: "Groceries"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     """Get all global categories"""
     conn = get_db_connection()
     cur = conn.cursor()
@@ -189,6 +327,70 @@ def api_get_categories():
 @app.route('/categories/<int:id>', methods=['PUT'])
 @jwt_required()
 def update_category(id):
+    """
+    Update a category
+    ---
+    tags:
+      - Categories
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - name: id
+        in: path
+        type: integer
+        required: true
+        description: ID of the category to update
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+              example: "Updated Category Name"
+    responses:
+      200:
+        description: Category updated successfully
+        schema:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 1
+            name:
+              type: string
+              example: "Updated Category Name"
+      400:
+        description: Bad request (missing name)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Name is required"
+      404:
+        description: Category not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Category not found"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     """Update global category name"""
     data = request.get_json()
     name = data.get("name")
@@ -211,6 +413,46 @@ def update_category(id):
 @app.route('/categories/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_category(id):
+    """
+    Delete a category
+    ---
+    tags:
+      - Categories
+    produces:
+      - application/json
+    parameters:
+      - name: id
+        in: path
+        type: integer
+        required: true
+        description: ID of the category to delete
+    responses:
+      200:
+        description: Category deleted successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "Category deleted"
+      404:
+        description: Category not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Category not found"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     """Delete a global category"""
     conn = get_db_connection()
     cur = conn.cursor()
@@ -231,6 +473,99 @@ from decimal import Decimal
 @app.route('/expenses', methods=['POST'])
 @jwt_required()
 def create_expense():
+    """
+    Create a new expense
+    ---
+    tags:
+      - Expenses
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - amount
+            - description
+            - categoryId
+          properties:
+            amount:
+              type: number
+              format: float
+              example: 25.50
+            description:
+              type: string
+              example: "Lunch at restaurant"
+            categoryId:
+              type: integer
+              example: 1
+            date:
+              type: string
+              format: date
+              example: "2025-09-24"
+    responses:
+      201:
+        description: Expense created successfully
+        schema:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 10
+            description:
+              type: string
+              example: "Lunch at restaurant"
+            amount:
+              type: number
+              format: float
+              example: 25.50
+            date:
+              type: string
+              format: date
+              example: "2025-09-24"
+            category:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 1
+                name:
+                  type: string
+                  example: "Food"
+            balance:
+              type: number
+              format: float
+              example: 1974.50
+      400:
+        description: Bad request (missing fields or invalid values)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Amount, description, and categoryId are required"
+      404:
+        description: Category not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Category not found"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     """Create an expense for a user with a category (balance can go negative)"""
     user_id = get_jwt_identity()
     data = request.get_json()
@@ -238,7 +573,7 @@ def create_expense():
     description = data.get("description")
     category_id = data.get("categoryId")
     expense_date = data.get("date", str(datetime.date.today()))
-    print("ADKLGHLKJHLKJHLKJIH")
+
     # Validate input
     if not all([amount, description, category_id]):
         return jsonify({"error": "Amount, description, and categoryId are required"}), 400
@@ -260,7 +595,7 @@ def create_expense():
     try:
         # Apply monthly payday first
         balance = apply_monthly_payday(user_id)  # should return Decimal
-
+        
         # Check if category exists
         cur.execute("SELECT id, name FROM categories WHERE id = %s", (category_id,))
         cat = cur.fetchone()
@@ -294,6 +629,89 @@ def create_expense():
 @app.route('/expenses', methods=['GET'])
 @jwt_required()
 def get_expenses():
+    """
+    Get user expenses
+    ---
+    tags:
+      - Expenses
+    produces:
+      - application/json
+    parameters:
+      - name: categoryId
+        in: query
+        type: integer
+        required: false
+        description: Filter by category ID
+        example: 1
+      - name: minAmount
+        in: query
+        type: number
+        format: float
+        required: false
+        description: Minimum expense amount
+        example: 10.5
+      - name: maxAmount
+        in: query
+        type: number
+        format: float
+        required: false
+        description: Maximum expense amount
+        example: 100
+      - name: startDate
+        in: query
+        type: string
+        format: date
+        required: false
+        description: Start date for filtering (YYYY-MM-DD)
+        example: "2025-01-01"
+      - name: endDate
+        in: query
+        type: string
+        format: date
+        required: false
+        description: End date for filtering (YYYY-MM-DD)
+        example: "2025-12-31"
+    responses:
+      200:
+        description: List of expenses
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                example: 10
+              description:
+                type: string
+                example: "Lunch at restaurant"
+              amount:
+                type: number
+                format: float
+                example: 25.50
+              date:
+                type: string
+                format: date
+                example: "2025-09-24"
+              category:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: "Food"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     user_id = get_jwt_identity()
     
     # Convert and validate parameters
@@ -343,6 +761,42 @@ def get_expenses():
 @app.route("/me", methods=["GET"])
 @jwt_required()
 def me():
+    """
+    Get authenticated user info
+    ---
+    tags:
+      - Users
+    produces:
+      - application/json
+    responses:
+      200:
+        description: Returns current user balance and placeholder value
+        schema:
+          type: object
+          properties:
+            user_id:
+              type: integer
+              example: 1
+            balance:
+              type: number
+              format: float
+              example: 2000.0
+            placeholder_value:
+              type: number
+              format: float
+              example: 0.0
+            message:
+              type: string
+              example: "You are authenticated!"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
     user_id = get_jwt_identity()
 
     conn = get_db_connection()
@@ -374,6 +828,80 @@ def me():
 @app.route('/expenses/<int:expense_id>', methods=['PUT'])
 @jwt_required()
 def update_expense(expense_id):
+    """
+    Update an existing expense
+    ---
+    tags:
+      - Expenses
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - name: expense_id
+        in: path
+        type: integer
+        required: true
+        description: ID of the expense to update
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            amount:
+              type: number
+              format: float
+              example: 30.0
+            description:
+              type: string
+              example: "Dinner at restaurant"
+            categoryId:
+              type: integer
+              example: 2
+            date:
+              type: string
+              format: date
+              example: "2025-09-24"
+          description: At least one field must be provided
+    responses:
+      200:
+        description: Expense updated successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "Expense updated"
+            id:
+              type: integer
+              example: 10
+      400:
+        description: Bad request (no fields provided or invalid date)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "At least one field is required to update"
+      404:
+        description: Expense not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Expense not found"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     """Update an existing expense (only description, amount, category, date)"""
     user_id = get_jwt_identity()
     data = request.get_json()
@@ -438,6 +966,49 @@ def update_expense(expense_id):
 @app.route('/expenses/<int:expense_id>', methods=['DELETE'])
 @jwt_required()
 def delete_expense(expense_id):
+    """
+    Delete an expense
+    ---
+    tags:
+      - Expenses
+    produces:
+      - application/json
+    parameters:
+      - name: expense_id
+        in: path
+        type: integer
+        required: true
+        description: ID of the expense to delete
+    responses:
+      200:
+        description: Expense deleted successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "Expense deleted"
+            id:
+              type: integer
+              example: 10
+      404:
+        description: Expense not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Expense not found"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
+
     """Delete an expense"""
     user_id = get_jwt_identity()
 
@@ -458,6 +1029,100 @@ def delete_expense(expense_id):
 @app.route('/aggregation', methods=['GET'])
 @jwt_required()
 def aggregation():
+    """
+    Aggregate user finances over a given period
+    ---
+    tags:
+      - Aggregation
+    produces:
+      - application/json
+    parameters:
+      - name: period
+        in: query
+        type: string
+        enum: [month, quarter, year]
+        required: false
+        default: month
+        description: "Period to aggregate (month, quarter, or year). Defaults to month."
+    responses:
+      200:
+        description: Aggregated user finances and KPIs
+        schema:
+          type: object
+          properties:
+            period:
+              type: string
+              example: "month"
+            start_date:
+              type: string
+              format: date
+              example: "2025-09-01"
+            end_date:
+              type: string
+              format: date
+              example: "2025-09-24"
+            earned:
+              type: number
+              format: float
+              example: 2000.0
+            spent:
+              type: number
+              format: float
+              example: 1200.0
+            balance:
+              type: number
+              format: float
+              example: 800.0
+            kpis:
+              type: object
+              properties:
+                savings:
+                  type: number
+                  example: 800.0
+                savings_rate_percent:
+                  type: number
+                  example: 40.0
+                fixed_expense_ratio_percent:
+                  type: number
+                  example: 30.0
+                debt_to_income_percent:
+                  type: number
+                  example: 10.0
+                discretionary_ratio_percent:
+                  type: number
+                  example: 5.0
+                housing_cost_ratio_percent:
+                  type: number
+                  example: 30.0
+                health_education_ratio_percent:
+                  type: number
+                  example: 5.0
+                fun_ratio_percent:
+                  type: number
+                  example: 2.0
+                investment_contribution_percent:
+                  type: number
+                  example: 10.0
+                emergency_fund_coverage_months:
+                  type: number
+                  example: 0.5
+      400:
+        description: Invalid period parameter
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Invalid period, use month|quarter|year"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+        schema:
+          type: object
+          properties:
+            msg:
+              type: string
+              example: "Missing Authorization Header"
+    """
     """
     Aggregate user finances over a given period and calculate KPIs.
     Query params:
@@ -494,10 +1159,10 @@ def aggregation():
     cur.execute("SELECT key, value FROM TBA_SIO")
     vars_dict = {row[0]: float(row[1]) for row in cur.fetchall()}
 
-    net_income = vars_dict.get("Me", 100)
+    net_income = vars_dict.get("Me", 2000)
     housing = vars_dict.get("House", 600)
     utilities = vars_dict.get("Utilities", 0)
-    insurance = vars_dict.get("Insurance", 100000)
+    insurance = vars_dict.get("Insurance", 0)
     subscriptions = vars_dict.get("Subscriptions", 0)
     debt = vars_dict.get("DebtPayments", 0)
     discretionary = vars_dict.get("Discretionary", 0)
@@ -508,6 +1173,8 @@ def aggregation():
 
     # Calculate earned for the period based on net_income
     months_in_period = ((today.year - start_date.year) * 12 + today.month - start_date.month + 1)
+    
+    """       Not correct im not saving income for each month      """
     earned = net_income * months_in_period
 
     # Total expenses: actual expenses from table + fixed costs from TBA_SIO

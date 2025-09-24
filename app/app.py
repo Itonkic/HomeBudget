@@ -310,14 +310,10 @@ def me():
     balance = row[0] or 0
     last_payday = row[1]
 
-    today = datetime.date.today()
-
-    # Apply monthly payday if needed
-    if not last_payday or last_payday.month < today.month or last_payday.year < today.year:
-        balance += 2000
-        cur.execute("UPDATE users SET balance = %s, last_payday = %s WHERE id = %s",
-                    (balance, today.replace(day=1), user_id))
-        conn.commit()
+    # Read placeholder value from TBA_SIO
+    cur.execute("SELECT VALUE FROM TBA_SIO WHERE KEY = %s", ("Me",))
+    sio_row = cur.fetchone()
+    placeholder_value = float(sio_row[0]) if sio_row else 0
 
     cur.close()
     conn.close()
@@ -325,8 +321,10 @@ def me():
     return jsonify({
         "user_id": user_id,
         "balance": float(balance),
+        "placeholder_value": placeholder_value,
         "message": "You are authenticated!"
     })
+
 
 # ---------- EXPENSES UPDATE ----------
 @app.route('/expenses/<int:expense_id>', methods=['PUT'])
@@ -413,7 +411,101 @@ def delete_expense(expense_id):
     return jsonify({"message": "Expense deleted", "id": expense_id}), 200
     
     
-    
+@app.route('/aggregation', methods=['GET'])
+@jwt_required()
+def aggregation():
+    """
+    Aggregate user finances over a given period and calculate KPIs.
+    Query params:
+      period = month | quarter | year (default: month)
+    """
+    user_id = get_jwt_identity()
+    period = request.args.get("period", "month")
+    today = datetime.date.today()
+
+    # Determine date range
+    if period == "month":
+        start_date = today.replace(day=1)
+    elif period == "quarter":
+        quarter = (today.month - 1) // 3 + 1
+        start_month = 3 * (quarter - 1) + 1
+        start_date = datetime.date(today.year, start_month, 1)
+    elif period == "year":
+        start_date = datetime.date(today.year, 1, 1)
+    else:
+        return jsonify({"error": "Invalid period, use month|quarter|year"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Fetch user expenses in range
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM expenses
+        WHERE user_id = %s AND date >= %s AND date <= %s
+    """, (user_id, start_date, today))
+    spent = float(cur.fetchone()[0] or 0)
+
+    # Fetch variables from TBA_SIO
+    cur.execute("SELECT key, value FROM TBA_SIO")
+    vars_dict = {row[0]: float(row[1]) for row in cur.fetchall()}
+
+    net_income = vars_dict.get("Me", 2000)
+    housing = vars_dict.get("House", 600)
+    utilities = vars_dict.get("Utilities", 0)
+    insurance = vars_dict.get("Insurance", 0)
+    subscriptions = vars_dict.get("Subscriptions", 0)
+    debt = vars_dict.get("DebtPayments", 0)
+    discretionary = vars_dict.get("Discretionary", 0)
+    emergency_fund = vars_dict.get("EmergencyFund", 0)
+    investments = vars_dict.get("Investments", 0)
+    health_edu = vars_dict.get("HealthEducation", 0)
+    fun = vars_dict.get("Fun", 0)
+
+    # Calculate earned for the period based on net_income
+    months_in_period = ((today.year - start_date.year) * 12 + today.month - start_date.month + 1)
+    earned = net_income * months_in_period
+
+    # Total expenses: actual expenses from table + fixed costs from TBA_SIO
+    fixed_expenses = housing + utilities + insurance + subscriptions
+    total_expenses = spent + fixed_expenses
+
+    # ---------- KPIs ----------
+    savings = earned - total_expenses
+    savings_rate = (savings / earned * 100) if earned else 0
+    fixed_expense_ratio = (fixed_expenses / earned * 100) if earned else 0
+    debt_to_income = (debt / net_income * 100) if net_income else 0
+    discretionary_ratio = (discretionary / net_income * 100) if net_income else 0
+    housing_cost_ratio = (housing / net_income * 100) if net_income else 0
+    health_edu_ratio = (health_edu / net_income * 100) if net_income else 0
+    fun_ratio = (fun / net_income * 100) if net_income else 0
+    investment_contribution = (investments / net_income * 100) if net_income else 0
+    emergency_fund_coverage = (emergency_fund / total_expenses) if total_expenses else 0
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "period": period,
+        "start_date": str(start_date),
+        "end_date": str(today),
+        "earned": earned,
+        "spent": total_expenses,
+        "balance": earned - total_expenses,
+        "kpis": {
+            "savings": savings,
+            "savings_rate_percent": round(savings_rate, 2),
+            "fixed_expense_ratio_percent": round(fixed_expense_ratio, 2),
+            "debt_to_income_percent": round(debt_to_income, 2),
+            "discretionary_ratio_percent": round(discretionary_ratio, 2),
+            "housing_cost_ratio_percent": round(housing_cost_ratio, 2),
+            "health_education_ratio_percent": round(health_edu_ratio, 2),
+            "fun_ratio_percent": round(fun_ratio, 2),
+            "investment_contribution_percent": round(investment_contribution, 2),
+            "emergency_fund_coverage_months": round(emergency_fund_coverage, 2)
+        }
+    })
+
     
     
 # ---------- DEFAULT ----------

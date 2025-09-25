@@ -25,6 +25,7 @@ It uses PostgreSQL as the database and runs inside Docker containers for easy se
 └── tests.txt # Test cases
 ```
 
+```text
 🚀 Getting Started
 1. Clone the repository or download (on top right there is green button Code then on bottom download zip)
 git clone https://github.com/your-username/HomeBudget.git
@@ -40,7 +41,10 @@ This will start:
 1. Flask app → http://localhost:5000
 2. PostgreSQL database (port 5432)
 3. pgAdmin → http://localhost:8081
+```
 
+
+```text
 🛠 Services
 Web (Flask App)
 Runs on port 5000
@@ -58,8 +62,10 @@ Default login:
 Email: admin@admin.com
 Password: admin
 
+```
 
 
+```text
 ⚙️ Environment Variables
 Configured in docker-compose.yml:
 
@@ -73,13 +79,16 @@ db	POSTGRES_USER	postgres
 db	POSTGRES_PASSWORD	postgres
 pgadmin	PGADMIN_DEFAULT_EMAIL	admin@admin.com
 
+```
 
+```text
 🧑‍💻 Development
 Modify Flask code inside app/
 Database schema updates → db_init/init.sql
 To rebuild after changes:
 docker compose down -v
 
+```
 
 
 

@@ -70,7 +70,7 @@ docker compose up --build
 
 This will start:
 
-1. Flask app → http://localhost:5000
+1. Flask app → **http://localhost:5000**
 2. PostgreSQL database (port 5432)
 3. pgAdmin → http://localhost:8081
 ```

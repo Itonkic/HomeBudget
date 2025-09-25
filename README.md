@@ -64,12 +64,17 @@ git clone https://github.com/your-username/HomeBudget.git
 cd HomeBudget
 If ZIP was downloaded extract it and open cmd in root directory HomeBudget-main
 
-2. Build and start the services
+2. Download Docker desktop from official site https://www.docker.com/products/docker-desktop/
+
+3. Build and start the services
 Run from the project root:
 docker compose up --build
 
-This will start:
 
+
+
+
+This will start:
 1. Flask app → **http://localhost:5000**
 2. PostgreSQL database (port 5432)
 3. pgAdmin → http://localhost:8081

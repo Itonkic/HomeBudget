@@ -3,27 +3,27 @@
 HomeBudget is a simple Flask-based web application for managing and tracking personal expenses.
 It uses PostgreSQL as the database and runs inside Docker containers for easy setup and deployment.
 
-📂 Project Structure
-HomeBudget
+```text
+📂 HomeBudget
 │
-├── app/                      # Flask application
-│   ├── static/               # Static files (CSS, JS, images)
-│   ├── templates/            # HTML templates
-│   ├── app.py                # Flask entrypoint
-│   ├── main.py               # Additional Flask logic
-│   ├── budget.db             # Local SQLite (legacy, not used in Docker)
-│   ├── Dockerfile            # Dockerfile for Flask app
-│   └── requirements.txt      # Python dependencies
+├── app/ # Flask application
+│ ├── static/ # Static files (CSS, JS, images)
+│ ├── templates/ # HTML templates
+│ ├── app.py # Flask entrypoint
+│ ├── main.py # Additional Flask logic
+│ ├── budget.db # Local SQLite (legacy, not used in Docker)
+│ ├── Dockerfile # Dockerfile for Flask app
+│ └── requirements.txt # Python dependencies
 │
-├── db_init/                  # Database initialization
-│   └── init.sql              # SQL script to bootstrap database
+├── db_init/ # Database initialization
+│ └── init.sql # SQL script to bootstrap database
 │
-├── docker-compose.yml        # Docker Compose configuration
-├── .gitignore                # Git ignore rules
-├── README.md                 # Project documentation
-├── test.py                   # Example/test script
-└── tests.txt                 # Test cases
-
+├── docker-compose.yml # Docker Compose configuration
+├── .gitignore # Git ignore rules
+├── README.md # Project documentation
+├── test.py # Example/test script
+└── tests.txt # Test cases
+```
 
 🚀 Getting Started
 1. Clone the repository or download (on top right there is green button Code then on bottom download zip)

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect
 import psycopg2
 import os
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -7,11 +7,22 @@ from flask_jwt_extended import (
 )
 import datetime
 from flasgger import Swagger
+from psycopg2.errors import UniqueViolation
+
 
 
 app = Flask(__name__)
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "super-secret")  
-swagger = Swagger(app)
+swagger = Swagger(app, template={
+    "securityDefinitions": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT Authorization header using the Bearer scheme. Example: 'Bearer {token}'"
+        }
+    }
+})
 jwt = JWTManager(app)
 
 def get_db_connection():
@@ -30,17 +41,32 @@ def apply_monthly_payday(user_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Get current balance and last_payday
-    cur.execute("SELECT balance, last_payday FROM users WHERE id = %s", (user_id,))
+    cur.execute("SELECT balance, last_payday, salary FROM users WHERE id = %s", (user_id,))
     result = cur.fetchone()
-    balance, last_payday = result
+    if not result:
+        cur.close()
+        conn.close()
+        return None  # user not found
+    cur.execute("SELECT key, value FROM tba_sio WHERE key IN ('Rent')")
+    sio_values = dict(cur.fetchall())
 
+
+    rent = sio_values.get("Rent", 0)
+    
+    cur.execute("SELECT count(distinct(username)) FROM public.users")
+    usercount = cur.fetchone()[0]  
+    rent = rent / usercount
+    balance, last_payday, salary = result
     today = datetime.date.today()
-    first_of_month = today.replace(day=1)
 
-    # Apply payday if last_payday is None or before this month
-    if not last_payday or last_payday < first_of_month:
-        balance += 2000
+    # Convert last_payday to date if it's datetime
+    if last_payday and isinstance(last_payday, datetime.datetime):
+        last_payday = last_payday.date()
+
+    # Apply salary only if last_payday is None or not in current month/year
+    if not last_payday or (last_payday.year < today.year or last_payday.month < today.month):
+        balance += salary
+        balance -= rent
         cur.execute(
             "UPDATE users SET balance = %s, last_payday = %s WHERE id = %s",
             (balance, today, user_id)
@@ -53,9 +79,7 @@ def apply_monthly_payday(user_id):
 
 # ---------- AUTH ROUTES ----------
 
-from flask import request, jsonify
-from werkzeug.security import generate_password_hash
-from psycopg2.errors import UniqueViolation
+
 
 @app.route("/register", methods=["POST"])
 def register():
@@ -114,12 +138,13 @@ def register():
     data = request.get_json() or {}
     username = data.get("username")
     password = data.get("password")
+    MONTHLY_INCOME=2000
 
     if not username or not password:
         return jsonify({"error": "Missing username or password"}), 400
-
+    from datetime import date
     hashed_pw = generate_password_hash(password)
-
+    today = date.today()
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -128,9 +153,10 @@ def register():
         if cur.fetchone():
             return jsonify({"error": "Username already exists"}), 400
 
+        # Insert new user with initial balance
         cur.execute(
-            "INSERT INTO users (username, password) VALUES (%s, %s)",
-            (username, hashed_pw)
+            "INSERT INTO users (username, password, balance,salary,last_payday) VALUES (%s, %s, %s, %s, %s)",
+            (username, hashed_pw, MONTHLY_INCOME,MONTHLY_INCOME,today)
         )
         conn.commit()
     except UniqueViolation:
@@ -138,12 +164,15 @@ def register():
         return jsonify({"error": "Username already exists"}), 400
     except Exception as e:
         conn.rollback()
-        return jsonify({"error": "Database error"}), 500
+        return jsonify({"error": "Database error", "details": str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
-    return jsonify({"message": "User registered successfully"}), 201
+    return jsonify({
+        "message": "User registered successfully",
+        "initial_balance": MONTHLY_INCOME
+    }), 201
 
 
 
@@ -221,6 +250,8 @@ def api_create_category():
     ---
     tags:
       - Categories
+    security:
+      - Bearer: []
     consumes:
       - application/json
     produces:
@@ -297,6 +328,8 @@ def api_get_categories():
     ---
     tags:
       - Categories
+    security:
+      - Bearer: []
     produces:
       - application/json
     responses:
@@ -340,6 +373,8 @@ def update_category(id):
     ---
     tags:
       - Categories
+    security:
+      - Bearer: []
     consumes:
       - application/json
     produces:
@@ -426,6 +461,8 @@ def delete_category(id):
     ---
     tags:
       - Categories
+    security:
+      - Bearer: []
     produces:
       - application/json
     parameters:
@@ -482,10 +519,12 @@ from decimal import Decimal
 @jwt_required()
 def create_expense():
     """
-    Create a new expense
+    Create a new expense (updates user balance)
     ---
     tags:
       - Expenses
+    security:
+      - Bearer: []
     consumes:
       - application/json
     produces:
@@ -517,7 +556,7 @@ def create_expense():
               example: "2025-09-24"
     responses:
       201:
-        description: Expense created successfully
+        description: Expense created successfully (balance updated)
         schema:
           type: object
           properties:
@@ -574,43 +613,40 @@ def create_expense():
               example: "Missing Authorization Header"
     """
 
-    """Create an expense for a user with a category (balance can go negative)"""
+    """Create an expense and update user's balance"""
     user_id = get_jwt_identity()
     data = request.get_json()
+
     amount = data.get("amount")
     description = data.get("description")
     category_id = data.get("categoryId")
     expense_date = data.get("date", str(datetime.date.today()))
 
-    # Validate input
     if not all([amount, description, category_id]):
         return jsonify({"error": "Amount, description, and categoryId are required"}), 400
 
-    # Convert amount to Decimal
     try:
         amount = Decimal(str(amount))
-    except (ValueError, TypeError):
+    except:
         return jsonify({"error": "Amount must be a number"}), 400
 
-    # Parse date
     try:
         expense_date = datetime.date.fromisoformat(expense_date)
-    except ValueError:
+    except:
         return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
 
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Apply monthly payday first
-        balance = apply_monthly_payday(user_id)  # should return Decimal
-        
-        # Check if category exists
+        # Check category exists
         cur.execute("SELECT id, name FROM categories WHERE id = %s", (category_id,))
         cat = cur.fetchone()
         if not cat:
             return jsonify({"error": "Category not found"}), 404
 
-        # Deduct expense from balance (can go negative)
+        # Deduct expense from balance
+        cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+        balance = Decimal(cur.fetchone()[0] or 0)
         balance -= amount
         cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
 
@@ -628,7 +664,7 @@ def create_expense():
     return jsonify({
         "id": expense_id,
         "description": description,
-        "amount": float(amount),  # convert for JSON
+        "amount": float(amount),
         "date": str(expense_date),
         "category": {"id": cat[0], "name": cat[1]},
         "balance": float(balance)
@@ -642,6 +678,8 @@ def get_expenses():
     ---
     tags:
       - Expenses
+    security:
+      - Bearer: []
     produces:
       - application/json
     parameters:
@@ -770,15 +808,17 @@ def get_expenses():
 @jwt_required()
 def me():
     """
-    Get authenticated user info
+    Get authenticated user info (current balance includes all expenses)
     ---
     tags:
       - Users
+    security:
+      - Bearer: []
     produces:
       - application/json
     responses:
       200:
-        description: Returns current user balance and placeholder value
+        description: Returns current user balance, reflecting all recorded expenses, and a placeholder value
         schema:
           type: object
           properties:
@@ -788,7 +828,7 @@ def me():
             balance:
               type: number
               format: float
-              example: 2000.0
+              example: 1974.50  # updated to reflect deductions from recorded expenses
             placeholder_value:
               type: number
               format: float
@@ -805,42 +845,41 @@ def me():
               type: string
               example: "Missing Authorization Header"
     """
+  
+    """Get authenticated user info with balance and placeholder value, applying monthly payday"""
     user_id = get_jwt_identity()
+    
+    # Apply monthly payday
+    balance = apply_monthly_payday(user_id)
+    if balance is None:
+        return jsonify({"error": "User not found"}), 404
 
     conn = get_db_connection()
     cur = conn.cursor()
-    
-    # Get current user balance and last_payday
-    cur.execute("SELECT balance, last_payday FROM users WHERE id = %s", (user_id,))
-    row = cur.fetchone()
-    balance = row[0] or 0
-    last_payday = row[1]
-
-    # Read placeholder value from TBA_SIO
-    cur.execute("SELECT VALUE FROM TBA_SIO WHERE KEY = %s", ("Me",))
-    sio_row = cur.fetchone()
-    placeholder_value = float(sio_row[0]) if sio_row else 0
-
+    cur.execute("SELECT salary FROM users WHERE id = %s", (user_id,))
+    salary = float(cur.fetchone()[0])
     cur.close()
     conn.close()
 
     return jsonify({
         "user_id": user_id,
         "balance": float(balance),
-        "placeholder_value": placeholder_value,
+        "salary": salary,
         "message": "You are authenticated!"
     })
-
+    
 
 # ---------- EXPENSES UPDATE ----------
 @app.route('/expenses/<int:expense_id>', methods=['PUT'])
 @jwt_required()
 def update_expense(expense_id):
     """
-    Update an existing expense
+    Update an existing expense (updates user balance)
     ---
     tags:
       - Expenses
+    security:
+      - Bearer: []
     consumes:
       - application/json
     produces:
@@ -874,7 +913,7 @@ def update_expense(expense_id):
           description: At least one field must be provided
     responses:
       200:
-        description: Expense updated successfully
+        description: Expense updated successfully (balance updated)
         schema:
           type: object
           properties:
@@ -884,6 +923,10 @@ def update_expense(expense_id):
             id:
               type: integer
               example: 10
+            balance:
+              type: number
+              format: float
+              example: 1975.00
       400:
         description: Bad request (no fields provided or invalid date)
         schema:
@@ -910,7 +953,7 @@ def update_expense(expense_id):
               example: "Missing Authorization Header"
     """
 
-    """Update an existing expense (only description, amount, category, date)"""
+    """Update an expense and adjust user's balance"""
     user_id = get_jwt_identity()
     data = request.get_json()
 
@@ -919,26 +962,32 @@ def update_expense(expense_id):
     category_id = data.get("categoryId")
     expense_date = data.get("date")
 
-    # Validate at least one field is present
     if not any([amount, description, category_id, expense_date]):
         return jsonify({"error": "At least one field is required to update"}), 400
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Make sure expense belongs to this user
-    cur.execute("SELECT id FROM expenses WHERE id = %s AND user_id = %s", (expense_id, user_id))
-    if cur.fetchone() is None:
+    # Fetch existing expense
+    cur.execute("SELECT amount FROM expenses WHERE id = %s AND user_id = %s", (expense_id, user_id))
+    row = cur.fetchone()
+    if not row:
         cur.close()
         conn.close()
         return jsonify({"error": "Expense not found"}), 404
 
-    # Build update query dynamically
+    old_amount = Decimal(row[0])
+
+    # Build update query
     fields, values = [], []
     if description:
         fields.append("description = %s")
         values.append(description)
     if amount:
+        try:
+            amount = Decimal(str(amount))
+        except:
+            return jsonify({"error": "Amount must be a number"}), 400
         fields.append("amount = %s")
         values.append(amount)
     if category_id:
@@ -947,38 +996,46 @@ def update_expense(expense_id):
     if expense_date:
         try:
             expense_date = datetime.date.fromisoformat(expense_date)
-        except ValueError:
+        except:
             return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
         fields.append("date = %s")
         values.append(expense_date)
 
-    values.append(expense_id)
-    values.append(user_id)
-
+    values.extend([expense_id, user_id])
     cur.execute(
         f"UPDATE expenses SET {', '.join(fields)} WHERE id = %s AND user_id = %s RETURNING id",
         tuple(values)
     )
     updated = cur.fetchone()
+    if not updated:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Expense not found"}), 404
+
+    # Adjust user's balance
+    if amount is not None:
+        cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+        balance = Decimal(cur.fetchone()[0] or 0)
+        balance = balance + old_amount - amount
+        cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
+
     conn.commit()
     cur.close()
     conn.close()
 
-    if not updated:
-        return jsonify({"error": "Expense not found"}), 404
-
     return jsonify({"message": "Expense updated", "id": expense_id}), 200
-
 
 # ---------- EXPENSES DELETE ----------
 @app.route('/expenses/<int:expense_id>', methods=['DELETE'])
 @jwt_required()
 def delete_expense(expense_id):
     """
-    Delete an expense
+    Delete an expense (updates user balance)
     ---
     tags:
       - Expenses
+    security:
+      - Bearer: []
     produces:
       - application/json
     parameters:
@@ -989,7 +1046,7 @@ def delete_expense(expense_id):
         description: ID of the expense to delete
     responses:
       200:
-        description: Expense deleted successfully
+        description: Expense deleted successfully (balance updated)
         schema:
           type: object
           properties:
@@ -999,6 +1056,10 @@ def delete_expense(expense_id):
             id:
               type: integer
               example: 10
+            balance:
+              type: number
+              format: float
+              example: 2000.00
       404:
         description: Expense not found
         schema:
@@ -1017,31 +1078,53 @@ def delete_expense(expense_id):
               example: "Missing Authorization Header"
     """
 
-    """Delete an expense"""
+    """Delete an expense and restore user's balance"""
     user_id = get_jwt_identity()
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    # Fetch amount before deletion
+    cur.execute("SELECT amount FROM expenses WHERE id = %s AND user_id = %s", (expense_id, user_id))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Expense not found"}), 404
+
+    amount = Decimal(row[0])
+
+    # Delete expense
     cur.execute("DELETE FROM expenses WHERE id = %s AND user_id = %s RETURNING id", (expense_id, user_id))
     deleted = cur.fetchone()
+    if not deleted:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Expense not found"}), 404
+
+    # Restore user's balance
+    cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+    balance = Decimal(cur.fetchone()[0] or 0)
+    balance += amount
+    cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
+
     conn.commit()
     cur.close()
     conn.close()
 
-    if not deleted:
-        return jsonify({"error": "Expense not found"}), 404
-
-    return jsonify({"message": "Expense deleted", "id": expense_id}), 200
+    return jsonify({"message": "Expense deleted", "id": expense_id, "balance": float(balance)}), 200
     
     
 @app.route('/aggregation', methods=['GET'])
 @jwt_required()
 def aggregation():
     """
-    Aggregate user finances over a given period
+    Aggregate user finances over a given period based on expenses & categories
     ---
     tags:
       - Aggregation
+    security:
+      - Bearer: []
     produces:
       - application/json
     parameters:
@@ -1055,92 +1138,12 @@ def aggregation():
     responses:
       200:
         description: Aggregated user finances and KPIs
-        schema:
-          type: object
-          properties:
-            period:
-              type: string
-              example: "month"
-            start_date:
-              type: string
-              format: date
-              example: "2025-09-01"
-            end_date:
-              type: string
-              format: date
-              example: "2025-09-24"
-            earned:
-              type: number
-              format: float
-              example: 2000.0
-            spent:
-              type: number
-              format: float
-              example: 1200.0
-            balance:
-              type: number
-              format: float
-              example: 800.0
-            kpis:
-              type: object
-              properties:
-                savings:
-                  type: number
-                  example: 800.0
-                savings_rate_percent:
-                  type: number
-                  example: 40.0
-                fixed_expense_ratio_percent:
-                  type: number
-                  example: 30.0
-                debt_to_income_percent:
-                  type: number
-                  example: 10.0
-                discretionary_ratio_percent:
-                  type: number
-                  example: 5.0
-                housing_cost_ratio_percent:
-                  type: number
-                  example: 30.0
-                health_education_ratio_percent:
-                  type: number
-                  example: 5.0
-                fun_ratio_percent:
-                  type: number
-                  example: 2.0
-                investment_contribution_percent:
-                  type: number
-                  example: 10.0
-                emergency_fund_coverage_months:
-                  type: number
-                  example: 0.5
-      400:
-        description: Invalid period parameter
-        schema:
-          type: object
-          properties:
-            error:
-              type: string
-              example: "Invalid period, use month|quarter|year"
-      401:
-        description: Unauthorized (JWT missing or invalid)
-        schema:
-          type: object
-          properties:
-            msg:
-              type: string
-              example: "Missing Authorization Header"
-    """
-    """
-    Aggregate user finances over a given period and calculate KPIs.
-    Query params:
-      period = month | quarter | year (default: month)
     """
     user_id = get_jwt_identity()
     period = request.args.get("period", "month")
     today = datetime.date.today()
 
-    # Determine date range
+    # ---- Period range ----
     if period == "month":
         start_date = today.replace(day=1)
     elif period == "quarter":
@@ -1155,51 +1158,45 @@ def aggregation():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Fetch user expenses in range
+    # ---- Get income (earned) ----
+    cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+    user_balance = float(cur.fetchone()[0] or 0)
+
+    # ---- Get expenses by category ----
     cur.execute("""
-        SELECT COALESCE(SUM(amount), 0)
-        FROM expenses
-        WHERE user_id = %s AND date >= %s AND date <= %s
+        SELECT c.name, COALESCE(SUM(e.amount),0) 
+        FROM expenses e
+        JOIN categories c ON e.category_id = c.id
+        WHERE e.user_id = %s AND e.date >= %s AND e.date <= %s
+        GROUP BY c.name
     """, (user_id, start_date, today))
-    spent = float(cur.fetchone()[0] or 0)
+    expenses_by_category = {row[0]: float(row[1]) for row in cur.fetchall()}
 
-    # Fetch variables from TBA_SIO
-    cur.execute("SELECT key, value FROM TBA_SIO")
-    vars_dict = {row[0]: float(row[1]) for row in cur.fetchall()}
+    # ---- Totals ----
+    spent = sum(expenses_by_category.values())
+    earned = user_balance + spent  # optional: if you track paydays elsewhere, adjust this
 
-    net_income = vars_dict.get("Me", 2000)
-    housing = vars_dict.get("House", 600)
-    utilities = vars_dict.get("Utilities", 0)
-    insurance = vars_dict.get("Insurance", 0)
-    subscriptions = vars_dict.get("Subscriptions", 0)
-    debt = vars_dict.get("DebtPayments", 0)
-    discretionary = vars_dict.get("Discretionary", 0)
-    emergency_fund = vars_dict.get("EmergencyFund", 0)
-    investments = vars_dict.get("Investments", 0)
-    health_edu = vars_dict.get("HealthEducation", 0)
-    fun = vars_dict.get("Fun", 0)
+    # ---- KPI mappings ----
+    housing = expenses_by_category.get("Rent / Mortgage", 0)
+    utilities = expenses_by_category.get("Utilities", 0)
+    insurance = expenses_by_category.get("Insurance", 0)
+    subscriptions = expenses_by_category.get("Subscriptions", 0)
 
-    # Calculate earned for the period based on net_income
-    months_in_period = ((today.year - start_date.year) * 12 + today.month - start_date.month + 1)
-    
-    """       Not correct im not saving income for each month      """
-    earned = net_income * months_in_period
+    health_edu = expenses_by_category.get("Health / Medical", 0) + expenses_by_category.get("Education / Courses", 0)
+    discretionary = expenses_by_category.get("Entertainment", 0) + expenses_by_category.get("Dining Out", 0) + expenses_by_category.get("Travel / Vacation", 0)
+    debt = expenses_by_category.get("Debt Payments", 0) if "Debt Payments" in expenses_by_category else 0
+    fun = expenses_by_category.get("Entertainment", 0)
 
-    # Total expenses: actual expenses from table + fixed costs from TBA_SIO
-    fixed_expenses = housing + utilities + insurance + subscriptions
-    total_expenses = spent + fixed_expenses
-
-    # ---------- KPIs ----------
-    savings = earned - total_expenses
+    # ---- KPIs ----
+    savings = earned - spent
     savings_rate = (savings / earned * 100) if earned else 0
+    fixed_expenses = housing + utilities + insurance + subscriptions
     fixed_expense_ratio = (fixed_expenses / earned * 100) if earned else 0
-    debt_to_income = (debt / net_income * 100) if net_income else 0
-    discretionary_ratio = (discretionary / net_income * 100) if net_income else 0
-    housing_cost_ratio = (housing / net_income * 100) if net_income else 0
-    health_edu_ratio = (health_edu / net_income * 100) if net_income else 0
-    fun_ratio = (fun / net_income * 100) if net_income else 0
-    investment_contribution = (investments / net_income * 100) if net_income else 0
-    emergency_fund_coverage = (emergency_fund / total_expenses) if total_expenses else 0
+    debt_to_income = (debt / earned * 100) if earned else 0
+    discretionary_ratio = (discretionary / earned * 100) if earned else 0
+    housing_cost_ratio = (housing / earned * 100) if earned else 0
+    health_edu_ratio = (health_edu / earned * 100) if earned else 0
+    fun_ratio = (fun / earned * 100) if earned else 0
 
     cur.close()
     conn.close()
@@ -1209,8 +1206,9 @@ def aggregation():
         "start_date": str(start_date),
         "end_date": str(today),
         "earned": earned,
-        "spent": total_expenses,
-        "balance": earned - total_expenses,
+        "spent": spent,
+        "balance": earned - spent,
+        "expenses_by_category": expenses_by_category,
         "kpis": {
             "savings": savings,
             "savings_rate_percent": round(savings_rate, 2),
@@ -1219,19 +1217,16 @@ def aggregation():
             "discretionary_ratio_percent": round(discretionary_ratio, 2),
             "housing_cost_ratio_percent": round(housing_cost_ratio, 2),
             "health_education_ratio_percent": round(health_edu_ratio, 2),
-            "fun_ratio_percent": round(fun_ratio, 2),
-            "investment_contribution_percent": round(investment_contribution, 2),
-            "emergency_fund_coverage_months": round(emergency_fund_coverage, 2)
+            "fun_ratio_percent": round(fun_ratio, 2)
         }
     })
-
     
     
 # ---------- DEFAULT ----------
+
 @app.route("/")
 def index():
-    return render_template("index.html")
-
+    return redirect("/apidocs")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

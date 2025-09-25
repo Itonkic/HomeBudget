@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS public.users
     password TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     balance NUMERIC DEFAULT 0,
-    last_payday DATE
+    last_payday DATE,
+    salary numeric(10,2)
 );
 
 -- =========================
@@ -38,7 +39,7 @@ CREATE TABLE IF NOT EXISTS public.expenses
 -- =========================
 CREATE TABLE IF NOT EXISTS public.tba_sio
 (
-    key VARCHAR(100) NOT NULL,
+    key VARCHAR(100) NOT NULL UNIQUE,
     value NUMERIC(10,2) NOT NULL
 );
 
@@ -68,3 +69,12 @@ INSERT INTO public.categories (id, name) VALUES
 (20, 'Miscellaneous')
 ON CONFLICT (id) DO NOTHING;
 
+
+
+
+-- =========================
+-- Populate default Reference table
+-- =========================
+INSERT INTO TBA_SIO (key, value) VALUES
+('Rent', 600.00)
+ON CONFLICT (key) DO NOTHING;

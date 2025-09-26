@@ -9,6 +9,7 @@ It uses PostgreSQL as the database and runs inside Docker containers for easy se
 
 | Feature / Task                                     | Priority | Status      | Target Version |
 |----------------------------------------------------|----------|-------------|----------------|
+| Refactor to use Blueprints and create tests        | High     | Done        | 0.9            |
 | User profile management (update username/password) | High     | Done        | 1.0            |
 | Enforce stronger password rules                    | High     | Done        | 1.0            |
 | JWT refresh tokens                                 | Medium   | Pending     | 1.0            |

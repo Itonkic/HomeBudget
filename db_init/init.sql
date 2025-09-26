@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS public.users
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     balance NUMERIC DEFAULT 0,
     last_payday DATE,
-    salary numeric(10,2)
+    salary numeric(10,2),
+    email VARCHAR(100) NOT NULL UNIQUE
 );
 
 -- =========================
@@ -78,3 +79,16 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO TBA_SIO (key, value) VALUES
 ('Rent', 600.00)
 ON CONFLICT (key) DO NOTHING;
+
+
+CREATE TABLE IF NOT EXISTS public.password_resets
+(
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    code VARCHAR(10) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_email FOREIGN KEY (email)
+        REFERENCES public.users (email)
+        ON DELETE CASCADE
+);

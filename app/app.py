@@ -5,13 +5,16 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
-import datetime
 from flasgger import Swagger
 from psycopg2.errors import UniqueViolation
 from functools import wraps
 import re
-from datetime import date
+from datetime import datetime, date, timedelta
+import random
+import string
 
+import smtplib
+from email.mime.text import MIMEText
 
 
 
@@ -84,11 +87,33 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-    
-import datetime
+def send_email(to_email, subject, message):
+    from_email = 'YOUR_EMAIL'
+    smtp_server = 'mail.SMTP_SERVER'
+    smtp_port = 587
+    smtp_username = from_email
+    smtp_password = 'YOUR_PASSWORD'
+    print(message)
+    # Create the email
+    msg = MIMEText(message, 'plain')  # plain text, can use 'html' if needed
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = subject
 
+    # Send the email
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(from_email, to_email, msg.as_string())
+        print(f"Email sent to {to_email}")
+    except Exception as e:
+        print(f"Failed to send email to {to_email}: {e}")
+
+
+    
 def apply_monthly_payday(user_id):
-    today = datetime.date.today()
+    today = date.today()
     
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -116,7 +141,7 @@ def apply_monthly_payday(user_id):
             balance, last_payday, salary = result
 
             # Convert last_payday to date if it's datetime
-            if last_payday and isinstance(last_payday, datetime.datetime):
+            if last_payday and isinstance(last_payday, datetime):
                 last_payday = last_payday.date()
 
             # Apply salary only if last_payday is None or not in current month/year
@@ -153,6 +178,7 @@ def register():
           required:
             - username
             - password
+            - email
           properties:
             username:
               type: string
@@ -160,6 +186,10 @@ def register():
             password:
               type: string
               example: MyPassword123!
+            email:
+              type: string
+              format: email
+              example: john@example.com
     responses:
       201:
         description: User registered successfully
@@ -173,7 +203,7 @@ def register():
               type: integer
               example: 2000
       400:
-        description: Bad request (missing fields, username exists, or weak password)
+        description: Bad request (missing fields, username/email exists, or weak password)
         schema:
           type: object
           properties:
@@ -217,15 +247,15 @@ def register():
               type: string
               example: Database error
     """
-
     data = request.get_json() or {}
     username = data.get("username")
     password = data.get("password")
+    email = data.get("email")
     MONTHLY_INCOME = 2000
 
-    if not username or not password:
+    if not username or not password or not email:
         return jsonify({
-            "error": "Missing username or password",
+            "error": "Missing username, password or email",
             "password_rules": PASSWORD_RULES
         }), 400
 
@@ -245,30 +275,18 @@ def register():
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 # Check if user already exists
-                cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+                cur.execute("SELECT 1 FROM users WHERE username = %s OR email = %s", (username, email))
                 if cur.fetchone():
-                    return jsonify({"error": "Username already exists"}), 400
+                    return jsonify({"error": "Username or Email already exists"}), 400
 
-                # Insert new user with initial balance
                 cur.execute(
-                    "INSERT INTO users (username, password, balance, salary, last_payday) "
-                    "VALUES (%s, %s, %s, %s, %s)",
-                    (username, hashed_pw, MONTHLY_INCOME, MONTHLY_INCOME, today)
+                    "INSERT INTO users (username, password, balance, salary, last_payday, email) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (username, hashed_pw, MONTHLY_INCOME, MONTHLY_INCOME, today, email)
                 )
-
-                # Check if this is the first user
-                cur.execute("SELECT COUNT(*) FROM users")
-                total_users = cur.fetchone()[0]
-                if total_users == 1:
-                    cur.execute(
-                        "INSERT INTO TBA_SIO (key, value) VALUES (%s, %s)",
-                        (username, 1)
-                    )
 
                 conn.commit()
 
-    except UniqueViolation:
-        return jsonify({"error": "Username already exists"}), 400
     except Exception as e:
         return jsonify({"error": "Database error", "details": str(e)}), 500
 
@@ -334,7 +352,7 @@ def login():
     if user and check_password_hash(user[1], password):
         access_token = create_access_token(
             identity=str(user[0]),
-            expires_delta=datetime.timedelta(hours=1)
+            expires_delta=timedelta(hours=1)
         )
         return jsonify({"access_token": access_token}), 200
     else:
@@ -710,7 +728,7 @@ def create_expense():
     amount = data.get("amount")
     description = data.get("description")
     category_id = data.get("categoryId")
-    expense_date = data.get("date", str(datetime.date.today()))
+    expense_date = data.get("date", str(date.today()))
 
     if not all([amount, description, category_id]):
         return jsonify({"error": "Amount, description, and categoryId are required"}), 400
@@ -721,7 +739,7 @@ def create_expense():
         return jsonify({"error": "Amount must be a number"}), 400
 
     try:
-        expense_date = datetime.date.fromisoformat(expense_date)
+        expense_date = date.fromisoformat(expense_date)
     except:
         return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
 
@@ -1084,7 +1102,7 @@ def update_expense(expense_id):
                 values.append(category_id)
             if expense_date:
                 try:
-                    expense_date = datetime.date.fromisoformat(expense_date)
+                    expense_date = date.fromisoformat(expense_date)
                 except:
                     return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
                 fields.append("date = %s")
@@ -1230,7 +1248,7 @@ def aggregation():
     """
     user_id = get_jwt_identity()
     period = request.args.get("period", "month")
-    today = datetime.date.today()
+    today = date.today()
 
     # ---- Determine start date based on period ----
     if period == "month":
@@ -1238,9 +1256,9 @@ def aggregation():
     elif period == "quarter":
         quarter = (today.month - 1) // 3 + 1
         start_month = 3 * (quarter - 1) + 1
-        start_date = datetime.date(today.year, start_month, 1)
+        start_date = date(today.year, start_month, 1)
     elif period == "year":
-        start_date = datetime.date(today.year, 1, 1)
+        start_date = date(today.year, 1, 1)
     else:
         return jsonify({"error": "Invalid period, use month|quarter|year"}), 400
 
@@ -1497,7 +1515,7 @@ def update_user(user_id):
 
     if "last_payday" in data:
         try:
-            last_payday = datetime.date.fromisoformat(data["last_payday"])
+            last_payday = date.fromisoformat(data["last_payday"])
             fields.append("last_payday = %s")
             values.append(last_payday)
         except ValueError:
@@ -1848,6 +1866,200 @@ def delete_tba_sio(key):
     cur.close()
     conn.close()
     return jsonify({"message": "Deleted", "key": key})
+
+
+
+
+# ---------- RESET ----------
+
+@app.route("/request-password-reset", methods=["POST"])
+def request_password_reset():
+    """
+    Request a password reset code
+    ---
+    tags:
+      - Authentication
+    produces:
+      - application/json
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              format: email
+              example: "user@example.com"
+              description: Email of the user requesting a password reset
+    responses:
+      200:
+        description: Reset code sent successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "Reset code sent to your email"
+      400:
+        description: Email not provided
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Email required"
+      404:
+        description: Email not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Email not found"
+    """
+
+    data = request.get_json() or {}
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Check if user exists
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            user = cur.fetchone()
+            if not user:
+                return jsonify({"error": "Email not found"}), 404
+
+            # Generate a 6-digit code
+            code = ''.join(random.choices(string.digits, k=6))
+            expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+            # Store code in password_resets table
+            cur.execute("""
+                INSERT INTO password_resets (email, code, expires_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (email) DO UPDATE
+                SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, created_at = CURRENT_TIMESTAMP
+            """, (email, code, expires_at))
+
+            conn.commit()
+
+    # Send email with code
+    send_email(email, "Password Reset Code", f"Your password reset code is: {code}")
+
+    return jsonify({"message": "Reset code sent to your email"}), 200
+
+@app.route("/verify-reset-code", methods=["POST"])
+def verify_reset_code():
+    """
+    Verify password reset code and set new password
+    ---
+    tags:
+      - Authentication
+    produces:
+      - application/json
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              format: email
+              example: "user@example.com"
+              description: Email of the user
+            code:
+              type: string
+              example: "123456"
+              description: 6-digit password reset code sent via email
+            new_password:
+              type: string
+              example: "NewStrongPass123!"
+              description: New password for the user
+    responses:
+      200:
+        description: Password reset successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "Password reset successfully"
+      400:
+        description: Bad request due to missing fields, invalid code, expired code, or password strength issues
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: "Reset code expired"
+            details:
+              type: array
+              items:
+                type: string
+              example: ["Password must contain at least one uppercase letter"]
+            password_rules:
+              type: array
+              items:
+                type: string
+              example: ["Minimum 8 characters", "At least 1 uppercase letter", "At least 1 number"]
+    """
+
+    data = request.get_json() or {}
+    email = data.get("email")
+    code = data.get("code")
+    new_password = data.get("new_password")
+
+    if not email or not code or not new_password:
+        return jsonify({"error": "Email, code, and new_password are required"}), 400
+
+    # Validate password strength
+    password_errors = validate_password(new_password)
+    if password_errors:
+        return jsonify({
+            "error": "Password does not meet requirements",
+            "details": password_errors,
+            "password_rules": PASSWORD_RULES
+        }), 400
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Fetch reset code from DB
+            cur.execute("""
+                SELECT code, expires_at 
+                FROM password_resets 
+                WHERE email = %s
+            """, (email,))
+            entry = cur.fetchone()
+
+            if not entry:
+                return jsonify({"error": "No reset request found"}), 400
+
+            stored_code, expires_at = entry
+
+            if datetime.utcnow() > expires_at:
+                return jsonify({"error": "Reset code expired"}), 400
+
+            if stored_code != code:
+                return jsonify({"error": "Invalid reset code"}), 400
+
+            # Update user password
+            hashed_pw = generate_password_hash(new_password)
+            cur.execute("UPDATE users SET password = %s WHERE email = %s", (hashed_pw, email))
+
+            # Delete used reset code
+            cur.execute("DELETE FROM password_resets WHERE email = %s", (email,))
+
+            conn.commit()
+
+    return jsonify({"message": "Password reset successfully"}), 200
+
 
 # ---------- DEFAULT ----------
 @app.route("/")

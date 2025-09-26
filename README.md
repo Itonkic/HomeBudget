@@ -12,7 +12,7 @@ It uses PostgreSQL as the database and runs inside Docker containers for easy se
 | User profile management (update username/password) | High     | Done        | 1.0            |
 | Enforce stronger password rules                    | High     | Done        | 1.0            |
 | JWT refresh tokens                                 | Medium   | Pending     | 1.0            |
-| SSL support (Let’s Encrypt + Docker/Nginx)         | High     | Pending     | 1.0            |
+| SSL support (Let’s Encrypt + Docker/Nginx)         | High     | Pending     | 1.2            |
 | Recurring expenses (subscriptions, bills)          | High     | Pending     | 1.1            |
 | Expense tags for advanced filtering                | Medium   | Pending     | 1.2            |
 | Bulk import of expenses (CSV/Excel)                | Medium   | Pending     | 1.2            |

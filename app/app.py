@@ -65,69 +65,73 @@ def get_db_connection():
         password=os.environ.get("POSTGRES_PASSWORD", "postgres")
     )
     return conn
-    
+
 
 def admin_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        current_user = get_jwt_identity()  # this is the username from the token
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM tba_sio WHERE key = %s", (current_user,))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
+        current_user = get_jwt_identity()  # username from the token
+
+        # Use context managers for connection and cursor
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM tba_sio WHERE key = %s", (current_user,))
+                row = cur.fetchone()
 
         if not row or row[0] != 1:
             return jsonify({"error": "Access denied. Admin rights required."}), 403
 
         return fn(*args, **kwargs)
     return wrapper
+
     
-    
+import datetime
+
 def apply_monthly_payday(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("SELECT balance, last_payday, salary FROM users WHERE id = %s", (user_id,))
-    result = cur.fetchone()
-    if not result:
-        cur.close()
-        conn.close()
-        return None  # user not found
-    cur.execute("SELECT key, value FROM tba_sio WHERE key IN ('Rent')")
-    sio_values = dict(cur.fetchall())
-
-
-    rent = sio_values.get("Rent", 0)
-    
-    cur.execute("SELECT count(distinct(username)) FROM public.users")
-    usercount = cur.fetchone()[0]  
-    rent = rent / usercount
-    balance, last_payday, salary = result
     today = datetime.date.today()
+    
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Fetch user info
+            cur.execute(
+                "SELECT balance, last_payday, salary FROM users WHERE id = %s", 
+                (user_id,)
+            )
+            result = cur.fetchone()
+            if not result:
+                return None  # user not found
 
-    # Convert last_payday to date if it's datetime
-    if last_payday and isinstance(last_payday, datetime.datetime):
-        last_payday = last_payday.date()
+            # Fetch Rent value
+            cur.execute(
+                "SELECT key, value FROM tba_sio WHERE key IN ('Rent')"
+            )
+            sio_values = dict(cur.fetchall())
+            rent = sio_values.get("Rent", 0)
 
-    # Apply salary only if last_payday is None or not in current month/year
-    if not last_payday or (last_payday.year < today.year or last_payday.month < today.month):
-        balance += salary
-        balance -= rent
-        cur.execute(
-            "UPDATE users SET balance = %s, last_payday = %s WHERE id = %s",
-            (balance, today, user_id)
-        )
-        conn.commit()
+            # Count users and divide rent
+            cur.execute("SELECT COUNT(DISTINCT username) FROM public.users")
+            usercount = cur.fetchone()[0]
+            rent = rent / usercount if usercount else 0
 
-    cur.close()
-    conn.close()
+            balance, last_payday, salary = result
+
+            # Convert last_payday to date if it's datetime
+            if last_payday and isinstance(last_payday, datetime.datetime):
+                last_payday = last_payday.date()
+
+            # Apply salary only if last_payday is None or not in current month/year
+            if not last_payday or (last_payday.year < today.year or last_payday.month < today.month):
+                balance += salary
+                balance -= rent
+                cur.execute(
+                    "UPDATE users SET balance = %s, last_payday = %s WHERE id = %s",
+                    (balance, today, user_id)
+                )
+                conn.commit()
+
     return balance
 
 # ---------- AUTH ROUTES ----------
-
-
 
 @app.route("/register", methods=["POST"])
 def register():
@@ -236,44 +240,42 @@ def register():
 
     hashed_pw = generate_password_hash(password)
     today = date.today()
-    conn = get_db_connection()
-    cur = conn.cursor()
+
     try:
-        # Check if user already exists
-        cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
-        if cur.fetchone():
-            return jsonify({"error": "Username already exists"}), 400
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Check if user already exists
+                cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+                if cur.fetchone():
+                    return jsonify({"error": "Username already exists"}), 400
 
-        # Insert new user with initial balance
-        cur.execute(
-            "INSERT INTO users (username, password, balance, salary, last_payday) VALUES (%s, %s, %s, %s, %s)",
-            (username, hashed_pw, MONTHLY_INCOME, MONTHLY_INCOME, today)
-        )
-        conn.commit()
+                # Insert new user with initial balance
+                cur.execute(
+                    "INSERT INTO users (username, password, balance, salary, last_payday) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (username, hashed_pw, MONTHLY_INCOME, MONTHLY_INCOME, today)
+                )
 
-        # Check if this is the first user
-        cur.execute("SELECT COUNT(*) FROM users")
-        total_users = cur.fetchone()[0]
-        if total_users == 1:
-            cur.execute("INSERT INTO TBA_SIO (key, value) VALUES (%s, %s)", (username, 1))
-            conn.commit()
+                # Check if this is the first user
+                cur.execute("SELECT COUNT(*) FROM users")
+                total_users = cur.fetchone()[0]
+                if total_users == 1:
+                    cur.execute(
+                        "INSERT INTO TBA_SIO (key, value) VALUES (%s, %s)",
+                        (username, 1)
+                    )
+
+                conn.commit()
 
     except UniqueViolation:
-        conn.rollback()
         return jsonify({"error": "Username already exists"}), 400
     except Exception as e:
-        conn.rollback()
         return jsonify({"error": "Database error", "details": str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
 
     return jsonify({
         "message": "User registered successfully",
         "initial_balance": MONTHLY_INCOME
     }), 201
-
-
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -323,22 +325,20 @@ def login():
     if not username or not password:
         return jsonify({"error": "Missing username or password"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, password FROM users WHERE username = %s", (username,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
+    # Use context managers for connection and cursor
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, password FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
 
     if user and check_password_hash(user[1], password):
-        access_token = create_access_token(identity=str(user[0]), expires_delta=datetime.timedelta(hours=1))
+        access_token = create_access_token(
+            identity=str(user[0]),
+            expires_delta=datetime.timedelta(hours=1)
+        )
         return jsonify({"access_token": access_token}), 200
     else:
         return jsonify({"error": "Invalid credentials"}), 401
-
-
-
-
 
 @app.route("/api/categories", methods=['POST'])
 @jwt_required()
@@ -393,30 +393,26 @@ def api_create_category():
     if not name:
         return jsonify({"error": "Name is required"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Check if category already exists
+            cur.execute("SELECT id FROM categories WHERE name = %s", (name,))
+            if cur.fetchone():
+                return jsonify({"error": "Category already exists"}), 400
 
-    try:
-        # Check if category already exists
-        cur.execute("SELECT id FROM categories WHERE name = %s", (name,))
-        if cur.fetchone():
-            return jsonify({"error": "Category already exists"}), 400
+            # Ensure sequence is in sync
+            cur.execute(
+                "SELECT setval('categories_id_seq', COALESCE((SELECT MAX(id) FROM categories), 0))"
+            )
 
-        # Ensure sequence is in sync
-        cur.execute(
-            "SELECT setval('categories_id_seq', COALESCE((SELECT MAX(id) FROM categories), 0))"
-        )
-
-        # Insert new category
-        cur.execute("INSERT INTO categories (name) VALUES (%s) RETURNING id", (name,))
-        category_id = cur.fetchone()[0]
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+            # Insert new category
+            cur.execute(
+                "INSERT INTO categories (name) VALUES (%s) RETURNING id", (name,)
+            )
+            category_id = cur.fetchone()[0]
+            conn.commit()
 
     return jsonify({"id": category_id, "name": name}), 201
-
 
 @app.route("/api/categories", methods=["GET"])
 @jwt_required()
@@ -455,12 +451,11 @@ def api_get_categories():
     """
 
     """Get all global categories"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, name FROM categories ORDER BY name")
-    categories = [{"id": row[0], "name": row[1]} for row in cur.fetchall()]
-    cur.close()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM categories ORDER BY name")
+            categories = [{"id": row[0], "name": row[1]} for row in cur.fetchall()]
+
     return jsonify(categories)
 
 @app.route('/categories/<int:id>', methods=['PUT'])
@@ -538,17 +533,16 @@ def update_category(id):
     if not name:
         return jsonify({"error": "Name is required"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE categories SET name = %s WHERE id = %s RETURNING id", (name, id))
-    if cur.fetchone() is None:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Category not found"}), 404
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE categories SET name = %s WHERE id = %s RETURNING id", (name, id)
+            )
+            updated = cur.fetchone()
+            if updated is None:
+                return jsonify({"error": "Category not found"}), 404
+            conn.commit()
 
-    conn.commit()
-    cur.close()
-    conn.close()
     return jsonify({"id": id, "name": name})
 
 @app.route('/categories/<int:id>', methods=['DELETE'])
@@ -597,16 +591,16 @@ def delete_category(id):
     """
 
     """Delete a global category"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM categories WHERE id = %s RETURNING id", (id,))
-    if cur.fetchone() is None:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Category not found"}), 404
-    conn.commit()
-    cur.close()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM categories WHERE id = %s RETURNING id", (id,)
+            )
+            deleted = cur.fetchone()
+            if deleted is None:
+                return jsonify({"error": "Category not found"}), 404
+            conn.commit()
+
     return jsonify({"message": "Category deleted"})
 
 from decimal import Decimal
@@ -731,31 +725,27 @@ def create_expense():
     except:
         return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        # Check category exists
-        cur.execute("SELECT id, name FROM categories WHERE id = %s", (category_id,))
-        cat = cur.fetchone()
-        if not cat:
-            return jsonify({"error": "Category not found"}), 404
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Check category exists
+            cur.execute("SELECT id, name FROM categories WHERE id = %s", (category_id,))
+            cat = cur.fetchone()
+            if not cat:
+                return jsonify({"error": "Category not found"}), 404
 
-        # Deduct expense from balance
-        cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
-        balance = Decimal(cur.fetchone()[0] or 0)
-        balance -= amount
-        cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
+            # Deduct expense from balance
+            cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+            balance = Decimal(cur.fetchone()[0] or 0)
+            balance -= amount
+            cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
 
-        # Insert expense
-        cur.execute(
-            "INSERT INTO expenses (description, amount, category_id, user_id, date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (description, amount, category_id, user_id, expense_date)
-        )
-        expense_id = cur.fetchone()[0]
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+            # Insert expense
+            cur.execute(
+                "INSERT INTO expenses (description, amount, category_id, user_id, date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (description, amount, category_id, user_id, expense_date)
+            )
+            expense_id = cur.fetchone()[0]
+            conn.commit()
 
     return jsonify({
         "id": expense_id,
@@ -854,9 +844,8 @@ def get_expenses():
               example: "Missing Authorization Header"
     """
 
+
     user_id = get_jwt_identity()
-    
-    # Convert and validate parameters
     category_id = request.args.get('categoryId', type=int)
     min_amount = request.args.get('minAmount', type=float)
     max_amount = request.args.get('maxAmount', type=float)
@@ -889,15 +878,18 @@ def get_expenses():
 
     query += " ORDER BY e.date DESC"
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(query, tuple(params))
-    expenses = [{
-        "id": r[0], "description": r[1], "amount": float(r[2]),
-        "date": r[3].isoformat(), "category": {"id": r[4], "name": r[5]}
-    } for r in cur.fetchall()]
-    cur.close()
-    conn.close()
+    # Using context managers
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            expenses = [{
+                "id": r[0],
+                "description": r[1],
+                "amount": float(r[2]),
+                "date": r[3].isoformat(),
+                "category": {"id": r[4], "name": r[5]}
+            } for r in cur.fetchall()]
+
     return jsonify(expenses)
 
 @app.route("/me", methods=["GET"])
@@ -944,18 +936,20 @@ def me():
   
     """Get authenticated user info with balance and placeholder value, applying monthly payday"""
     user_id = get_jwt_identity()
-    
+
     # Apply monthly payday
     balance = apply_monthly_payday(user_id)
     if balance is None:
         return jsonify({"error": "User not found"}), 404
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT salary FROM users WHERE id = %s", (user_id,))
-    salary = float(cur.fetchone()[0])
-    cur.close()
-    conn.close()
+    # Use context managers to safely handle DB connection and cursor
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT salary FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "User not found"}), 404
+            salary = float(row[0])
 
     return jsonify({
         "user_id": user_id,
@@ -964,8 +958,7 @@ def me():
         "message": "You are authenticated!"
     })
     
-
-# ---------- EXPENSES UPDATE ----------
+# ---------- EXPENSES ROUTES ----------
 @app.route('/expenses/<int:expense_id>', methods=['PUT'])
 @jwt_required()
 def update_expense(expense_id):
@@ -1061,67 +1054,65 @@ def update_expense(expense_id):
     if not any([amount, description, category_id, expense_date]):
         return jsonify({"error": "At least one field is required to update"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Fetch existing expense
+            cur.execute(
+                "SELECT amount FROM expenses WHERE id = %s AND user_id = %s",
+                (expense_id, user_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Expense not found"}), 404
 
-    # Fetch existing expense
-    cur.execute("SELECT amount FROM expenses WHERE id = %s AND user_id = %s", (expense_id, user_id))
-    row = cur.fetchone()
-    if not row:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Expense not found"}), 404
+            old_amount = Decimal(row[0])
 
-    old_amount = Decimal(row[0])
+            # Build update query
+            fields, values = [], []
+            if description:
+                fields.append("description = %s")
+                values.append(description)
+            if amount is not None:
+                try:
+                    amount = Decimal(str(amount))
+                except:
+                    return jsonify({"error": "Amount must be a number"}), 400
+                fields.append("amount = %s")
+                values.append(amount)
+            if category_id:
+                fields.append("category_id = %s")
+                values.append(category_id)
+            if expense_date:
+                try:
+                    expense_date = datetime.date.fromisoformat(expense_date)
+                except:
+                    return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
+                fields.append("date = %s")
+                values.append(expense_date)
 
-    # Build update query
-    fields, values = [], []
-    if description:
-        fields.append("description = %s")
-        values.append(description)
-    if amount:
-        try:
-            amount = Decimal(str(amount))
-        except:
-            return jsonify({"error": "Amount must be a number"}), 400
-        fields.append("amount = %s")
-        values.append(amount)
-    if category_id:
-        fields.append("category_id = %s")
-        values.append(category_id)
-    if expense_date:
-        try:
-            expense_date = datetime.date.fromisoformat(expense_date)
-        except:
-            return jsonify({"error": "Invalid date format, use YYYY-MM-DD"}), 400
-        fields.append("date = %s")
-        values.append(expense_date)
+            if not fields:
+                return jsonify({"error": "Nothing to update"}), 400
 
-    values.extend([expense_id, user_id])
-    cur.execute(
-        f"UPDATE expenses SET {', '.join(fields)} WHERE id = %s AND user_id = %s RETURNING id",
-        tuple(values)
-    )
-    updated = cur.fetchone()
-    if not updated:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Expense not found"}), 404
+            values.extend([expense_id, user_id])
+            cur.execute(
+                f"UPDATE expenses SET {', '.join(fields)} WHERE id = %s AND user_id = %s RETURNING id",
+                tuple(values)
+            )
+            updated = cur.fetchone()
+            if not updated:
+                return jsonify({"error": "Expense not found"}), 404
 
-    # Adjust user's balance
-    if amount is not None:
-        cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
-        balance = Decimal(cur.fetchone()[0] or 0)
-        balance = balance + old_amount - amount
-        cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
+            # Adjust user's balance if amount changed
+            if amount is not None:
+                cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+                balance = Decimal(cur.fetchone()[0] or 0)
+                balance = balance + old_amount - amount
+                cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        conn.commit()
 
-    return jsonify({"message": "Expense updated", "id": expense_id}), 200
+    return jsonify({"message": "Expense updated", "id": expense_id, "balance": float(balance) if amount is not None else None}), 200
 
-# ---------- EXPENSES DELETE ----------
 @app.route('/expenses/<int:expense_id>', methods=['DELETE'])
 @jwt_required()
 def delete_expense(expense_id):
@@ -1177,39 +1168,41 @@ def delete_expense(expense_id):
     """Delete an expense and restore user's balance"""
     user_id = get_jwt_identity()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Fetch amount before deletion
+            cur.execute(
+                "SELECT amount FROM expenses WHERE id = %s AND user_id = %s",
+                (expense_id, user_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Expense not found"}), 404
 
-    # Fetch amount before deletion
-    cur.execute("SELECT amount FROM expenses WHERE id = %s AND user_id = %s", (expense_id, user_id))
-    row = cur.fetchone()
-    if not row:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Expense not found"}), 404
+            amount = Decimal(row[0])
 
-    amount = Decimal(row[0])
+            # Delete expense
+            cur.execute(
+                "DELETE FROM expenses WHERE id = %s AND user_id = %s RETURNING id",
+                (expense_id, user_id)
+            )
+            deleted = cur.fetchone()
+            if not deleted:
+                return jsonify({"error": "Expense not found"}), 404
 
-    # Delete expense
-    cur.execute("DELETE FROM expenses WHERE id = %s AND user_id = %s RETURNING id", (expense_id, user_id))
-    deleted = cur.fetchone()
-    if not deleted:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Expense not found"}), 404
+            # Restore user's balance
+            cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+            balance = Decimal(cur.fetchone()[0] or 0)
+            balance += amount
+            cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
 
-    # Restore user's balance
-    cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
-    balance = Decimal(cur.fetchone()[0] or 0)
-    balance += amount
-    cur.execute("UPDATE users SET balance = %s WHERE id = %s", (balance, user_id))
+        conn.commit()
 
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return jsonify({"message": "Expense deleted", "id": expense_id, "balance": float(balance)}), 200
-    
+    return jsonify({
+        "message": "Expense deleted",
+        "id": expense_id,
+        "balance": float(balance)
+    }), 200
     
 @app.route('/aggregation', methods=['GET'])
 @jwt_required()
@@ -1239,7 +1232,7 @@ def aggregation():
     period = request.args.get("period", "month")
     today = datetime.date.today()
 
-    # ---- Period range ----
+    # ---- Determine start date based on period ----
     if period == "month":
         start_date = today.replace(day=1)
     elif period == "quarter":
@@ -1251,26 +1244,25 @@ def aggregation():
     else:
         return jsonify({"error": "Invalid period, use month|quarter|year"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # ---- Get user balance ----
+            cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
+            user_balance = float(cur.fetchone()[0] or 0)
 
-    # ---- Get income (earned) ----
-    cur.execute("SELECT balance FROM users WHERE id = %s", (user_id,))
-    user_balance = float(cur.fetchone()[0] or 0)
-
-    # ---- Get expenses by category ----
-    cur.execute("""
-        SELECT c.name, COALESCE(SUM(e.amount),0) 
-        FROM expenses e
-        JOIN categories c ON e.category_id = c.id
-        WHERE e.user_id = %s AND e.date >= %s AND e.date <= %s
-        GROUP BY c.name
-    """, (user_id, start_date, today))
-    expenses_by_category = {row[0]: float(row[1]) for row in cur.fetchall()}
+            # ---- Get expenses by category ----
+            cur.execute("""
+                SELECT c.name, COALESCE(SUM(e.amount),0) 
+                FROM expenses e
+                JOIN categories c ON e.category_id = c.id
+                WHERE e.user_id = %s AND e.date >= %s AND e.date <= %s
+                GROUP BY c.name
+            """, (user_id, start_date, today))
+            expenses_by_category = {row[0]: float(row[1]) for row in cur.fetchall()}
 
     # ---- Totals ----
     spent = sum(expenses_by_category.values())
-    earned = user_balance + spent  # optional: if you track paydays elsewhere, adjust this
+    earned = user_balance + spent  # Adjust if tracking paydays separately
 
     # ---- KPI mappings ----
     housing = expenses_by_category.get("Rent / Mortgage", 0)
@@ -1280,7 +1272,7 @@ def aggregation():
 
     health_edu = expenses_by_category.get("Health / Medical", 0) + expenses_by_category.get("Education / Courses", 0)
     discretionary = expenses_by_category.get("Entertainment", 0) + expenses_by_category.get("Dining Out", 0) + expenses_by_category.get("Travel / Vacation", 0)
-    debt = expenses_by_category.get("Debt Payments", 0) if "Debt Payments" in expenses_by_category else 0
+    debt = expenses_by_category.get("Debt Payments", 0)
     fun = expenses_by_category.get("Entertainment", 0)
 
     # ---- KPIs ----
@@ -1293,9 +1285,6 @@ def aggregation():
     housing_cost_ratio = (housing / earned * 100) if earned else 0
     health_edu_ratio = (health_edu / earned * 100) if earned else 0
     fun_ratio = (fun / earned * 100) if earned else 0
-
-    cur.close()
-    conn.close()
 
     return jsonify({
         "period": period,
@@ -1317,8 +1306,6 @@ def aggregation():
         }
     })
 
-
-# ---------- USERS CRUD ----------
 @app.route("/api/users", methods=["GET"])
 @jwt_required()
 @admin_required
@@ -1360,23 +1347,21 @@ def get_users():
       403:
         description: Access denied (requires admin rights)
     """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, username, balance, created_at, last_payday FROM users ORDER BY id")
-    users = [
-        {
-            "id": row[0],
-            "username": row[1],
-            "balance": float(row[2]) if row[2] is not None else 0,
-            "created_at": row[3].isoformat() if row[3] else None,
-            "last_payday": row[4].isoformat() if row[4] else None
-        }
-        for row in cur.fetchall()
-    ]
-    cur.close()
-    conn.close()
-    return jsonify(users)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, balance, created_at, last_payday FROM users ORDER BY id")
+            users = [
+                {
+                    "id": row[0],
+                    "username": row[1],
+                    "balance": float(row[2]) if row[2] is not None else 0,
+                    "created_at": row[3].isoformat() if row[3] else None,
+                    "last_payday": row[4].isoformat() if row[4] else None
+                }
+                for row in cur.fetchall()
+            ]
 
+    return jsonify(users)
 
 @app.route("/api/users/<int:user_id>", methods=["GET"])
 @jwt_required()
@@ -1425,14 +1410,17 @@ def get_user(user_id):
       404:
         description: User not found
     """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, username, balance, created_at, last_payday FROM users WHERE id = %s", (user_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, balance, created_at, last_payday FROM users WHERE id = %s",
+                (user_id,)
+            )
+            row = cur.fetchone()
+
     if not row:
         return jsonify({"error": "User not found"}), 404
+
     return jsonify({
         "id": row[0],
         "username": row[1],
@@ -1440,7 +1428,6 @@ def get_user(user_id):
         "created_at": row[3].isoformat() if row[3] else None,
         "last_payday": row[4].isoformat() if row[4] else None
     })
-
 
 @app.route("/api/users/<int:user_id>", methods=["PUT"])
 @jwt_required()
@@ -1502,40 +1489,39 @@ def update_user(user_id):
     if "balance" in data:
         fields.append("balance = %s")
         values.append(data["balance"])
+
     if "password" in data:
         hashed_pw = generate_password_hash(data["password"])
         fields.append("password = %s")
         values.append(hashed_pw)
+
     if "last_payday" in data:
         try:
             last_payday = datetime.date.fromisoformat(data["last_payday"])
             fields.append("last_payday = %s")
             values.append(last_payday)
-        except:
+        except ValueError:
             return jsonify({"error": "Invalid date format (use YYYY-MM-DD)"}), 400
 
     if not fields:
         return jsonify({"error": "No valid fields provided"}), 400
 
     values.append(user_id)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        f"UPDATE users SET {', '.join(fields)} WHERE id = %s RETURNING id",
-        tuple(values)
-    )
-    updated = cur.fetchone()
-    if not updated:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        return jsonify({"error": "User not found"}), 404
 
-    conn.commit()
-    cur.close()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE users SET {', '.join(fields)} WHERE id = %s RETURNING id",
+                tuple(values)
+            )
+            updated = cur.fetchone()
+            if not updated:
+                conn.rollback()
+                return jsonify({"error": "User not found"}), 404
+
+        conn.commit()
+
     return jsonify({"message": "User updated", "id": user_id})
-
 
 @app.route("/api/users/<int:user_id>", methods=["DELETE"])
 @jwt_required()
@@ -1669,7 +1655,6 @@ def create_tba_sio():
 
     return jsonify({"key": key, "value": value}), 201
 
-
 @app.route("/api/tba_sio", methods=["GET"])
 @jwt_required()
 @admin_required
@@ -1707,7 +1692,6 @@ def get_all_tba_sio():
     conn.close()
     return jsonify(entries)
 
-
 @app.route("/api/tba_sio/<string:key>", methods=["GET"])
 @jwt_required()
 @admin_required
@@ -1734,7 +1718,6 @@ def get_tba_sio(key):
     if not row:
         return jsonify({"error": "Key not found"}), 404
     return jsonify({"key": row[0], "value": float(row[1])})
-
 
 @app.route("/api/tba_sio/<string:key>", methods=["PUT"])
 @jwt_required()
@@ -1813,7 +1796,6 @@ def update_tba_sio(key):
     conn.close()
     return jsonify({"key": key, "value": value})
 
-
 @app.route("/api/tba_sio/<string:key>", methods=["DELETE"])
 @jwt_required()
 @admin_required
@@ -1872,7 +1854,15 @@ def delete_tba_sio(key):
 def index():
     return redirect("/apidocs")
 
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+
+
+
+
+
+
 
 

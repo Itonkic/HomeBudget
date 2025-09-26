@@ -8,6 +8,10 @@ from flask_jwt_extended import (
 import datetime
 from flasgger import Swagger
 from psycopg2.errors import UniqueViolation
+from functools import wraps
+import re
+from datetime import date
+
 
 
 
@@ -25,6 +29,34 @@ swagger = Swagger(app, template={
 })
 jwt = JWTManager(app)
 
+
+
+
+
+PASSWORD_RULES = {
+    "min_length": 8,
+    "uppercase": True,
+    "lowercase": True,
+    "digit": True,
+    "special_char": True
+}
+
+def validate_password(password: str):
+    errors = []
+
+    if len(password) < PASSWORD_RULES["min_length"]:
+        errors.append(f"Must be at least {PASSWORD_RULES['min_length']} characters long.")
+    if PASSWORD_RULES["uppercase"] and not re.search(r"[A-Z]", password):
+        errors.append("Must contain at least one uppercase letter.")
+    if PASSWORD_RULES["lowercase"] and not re.search(r"[a-z]", password):
+        errors.append("Must contain at least one lowercase letter.")
+    if PASSWORD_RULES["digit"] and not re.search(r"\d", password):
+        errors.append("Must contain at least one digit.")
+    if PASSWORD_RULES["special_char"] and not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        errors.append("Must contain at least one special character (!@#$%^&* etc.).")
+
+    return errors
+
 def get_db_connection():
     conn = psycopg2.connect(
         host=os.environ.get("POSTGRES_HOST", "db"),
@@ -34,7 +66,23 @@ def get_db_connection():
     )
     return conn
     
-    
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        current_user = get_jwt_identity()  # this is the username from the token
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM tba_sio WHERE key = %s", (current_user,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not row or row[0] != 1:
+            return jsonify({"error": "Access denied. Admin rights required."}), 403
+
+        return fn(*args, **kwargs)
+    return wrapper
     
     
 def apply_monthly_payday(user_id):
@@ -107,7 +155,7 @@ def register():
               example: john_doe
             password:
               type: string
-              example: mypassword123
+              example: MyPassword123!
     responses:
       201:
         description: User registered successfully
@@ -117,14 +165,45 @@ def register():
             message:
               type: string
               example: User registered successfully
+            initial_balance:
+              type: integer
+              example: 2000
       400:
-        description: Bad request (missing fields or username exists)
+        description: Bad request (missing fields, username exists, or weak password)
         schema:
           type: object
           properties:
             error:
               type: string
-              example: Username already exists
+              example: Password does not meet requirements
+            details:
+              type: array
+              items:
+                type: string
+              example:
+                - Must be at least 8 characters long.
+                - Must contain at least one uppercase letter.
+                - Must contain at least one lowercase letter.
+                - Must contain at least one digit.
+                - Must contain at least one special character (!@#$%^&* etc.).
+            password_rules:
+              type: object
+              properties:
+                min_length:
+                  type: integer
+                  example: 8
+                uppercase:
+                  type: boolean
+                  example: true
+                lowercase:
+                  type: boolean
+                  example: true
+                digit:
+                  type: boolean
+                  example: true
+                special_char:
+                  type: boolean
+                  example: true
       500:
         description: Internal server error
         schema:
@@ -138,11 +217,23 @@ def register():
     data = request.get_json() or {}
     username = data.get("username")
     password = data.get("password")
-    MONTHLY_INCOME=2000
+    MONTHLY_INCOME = 2000
 
     if not username or not password:
-        return jsonify({"error": "Missing username or password"}), 400
-    from datetime import date
+        return jsonify({
+            "error": "Missing username or password",
+            "password_rules": PASSWORD_RULES
+        }), 400
+
+    # Validate password strength
+    password_errors = validate_password(password)
+    if password_errors:
+        return jsonify({
+            "error": "Password does not meet requirements",
+            "details": password_errors,
+            "password_rules": PASSWORD_RULES
+        }), 400
+
     hashed_pw = generate_password_hash(password)
     today = date.today()
     conn = get_db_connection()
@@ -155,10 +246,18 @@ def register():
 
         # Insert new user with initial balance
         cur.execute(
-            "INSERT INTO users (username, password, balance,salary,last_payday) VALUES (%s, %s, %s, %s, %s)",
-            (username, hashed_pw, MONTHLY_INCOME,MONTHLY_INCOME,today)
+            "INSERT INTO users (username, password, balance, salary, last_payday) VALUES (%s, %s, %s, %s, %s)",
+            (username, hashed_pw, MONTHLY_INCOME, MONTHLY_INCOME, today)
         )
         conn.commit()
+
+        # Check if this is the first user
+        cur.execute("SELECT COUNT(*) FROM users")
+        total_users = cur.fetchone()[0]
+        if total_users == 1:
+            cur.execute("INSERT INTO TBA_SIO (key, value) VALUES (%s, %s)", (username, 1))
+            conn.commit()
+
     except UniqueViolation:
         conn.rollback()
         return jsonify({"error": "Username already exists"}), 400
@@ -173,7 +272,6 @@ def register():
         "message": "User registered successfully",
         "initial_balance": MONTHLY_INCOME
     }), 201
-
 
 
 
@@ -1220,10 +1318,279 @@ def aggregation():
             "fun_ratio_percent": round(fun_ratio, 2)
         }
     })
-    
-    
-# ---------- DEFAULT ----------
 
+
+# ---------- USERS CRUD ----------
+@app.route("/api/users", methods=["GET"])
+@jwt_required()
+@admin_required
+def get_users():
+    """
+    Get all users
+    ---
+    tags:
+      - Users
+    security:
+      - Bearer: []
+    produces:
+      - application/json
+    responses:
+      200:
+        description: List of all users
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                example: 1
+              username:
+                type: string
+                example: "admin"
+              balance:
+                type: number
+                example: 100.5
+              created_at:
+                type: string
+                example: "2025-09-26T12:00:00"
+              last_payday:
+                type: string
+                example: "2025-09-20"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+      403:
+        description: Access denied (requires admin rights)
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, balance, created_at, last_payday FROM users ORDER BY id")
+    users = [
+        {
+            "id": row[0],
+            "username": row[1],
+            "balance": float(row[2]) if row[2] is not None else 0,
+            "created_at": row[3].isoformat() if row[3] else None,
+            "last_payday": row[4].isoformat() if row[4] else None
+        }
+        for row in cur.fetchall()
+    ]
+    cur.close()
+    conn.close()
+    return jsonify(users)
+
+
+@app.route("/api/users/<int:user_id>", methods=["GET"])
+@jwt_required()
+@admin_required
+def get_user(user_id):
+    """
+    Get a user by ID
+    ---
+    tags:
+      - Users
+    security:
+      - Bearer: []
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        type: integer
+        required: true
+        description: ID of the user to fetch
+    responses:
+      200:
+        description: User object
+        schema:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 1
+            username:
+              type: string
+              example: "admin"
+            balance:
+              type: number
+              example: 100.5
+            created_at:
+              type: string
+              example: "2025-09-26T12:00:00"
+            last_payday:
+              type: string
+              example: "2025-09-20"
+      401:
+        description: Unauthorized (JWT missing or invalid)
+      403:
+        description: Access denied (requires admin rights)
+      404:
+        description: User not found
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, balance, created_at, last_payday FROM users WHERE id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({
+        "id": row[0],
+        "username": row[1],
+        "balance": float(row[2]) if row[2] else 0,
+        "created_at": row[3].isoformat() if row[3] else None,
+        "last_payday": row[4].isoformat() if row[4] else None
+    })
+
+
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+@jwt_required()
+@admin_required
+def update_user(user_id):
+    """
+    Update user details (balance, password, last_payday)
+    ---
+    tags:
+      - Users
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        type: integer
+        required: true
+        description: ID of the user to update
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            balance:
+              type: number
+              example: 200.75
+            password:
+              type: string
+              example: "new_secure_password"
+            last_payday:
+              type: string
+              example: "2025-09-21"
+    responses:
+      200:
+        description: User updated successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "User updated"
+            id:
+              type: integer
+              example: 1
+      400:
+        description: Invalid input (bad date format or empty body)
+      401:
+        description: Unauthorized (JWT missing or invalid)
+      403:
+        description: Access denied (requires admin rights)
+      404:
+        description: User not found
+    """
+    data = request.get_json() or {}
+    fields, values = [], []
+
+    if "balance" in data:
+        fields.append("balance = %s")
+        values.append(data["balance"])
+    if "password" in data:
+        hashed_pw = generate_password_hash(data["password"])
+        fields.append("password = %s")
+        values.append(hashed_pw)
+    if "last_payday" in data:
+        try:
+            last_payday = datetime.date.fromisoformat(data["last_payday"])
+            fields.append("last_payday = %s")
+            values.append(last_payday)
+        except:
+            return jsonify({"error": "Invalid date format (use YYYY-MM-DD)"}), 400
+
+    if not fields:
+        return jsonify({"error": "No valid fields provided"}), 400
+
+    values.append(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        f"UPDATE users SET {', '.join(fields)} WHERE id = %s RETURNING id",
+        tuple(values)
+    )
+    updated = cur.fetchone()
+    if not updated:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": "User updated", "id": user_id})
+
+
+@app.route("/api/users/<int:user_id>", methods=["DELETE"])
+@jwt_required()
+@admin_required
+def delete_user(user_id):
+    """
+    Delete a user by ID
+    ---
+    tags:
+      - Users
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: user_id
+        type: integer
+        required: true
+        description: ID of the user to delete
+    responses:
+      200:
+        description: User deleted successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "User deleted"
+            id:
+              type: integer
+              example: 1
+      401:
+        description: Unauthorized (JWT missing or invalid)
+      403:
+        description: Access denied (requires admin rights)
+      404:
+        description: User not found
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,))
+    deleted = cur.fetchone()
+    if not deleted:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": "User deleted", "id": user_id})
+
+
+
+# ---------- DEFAULT ----------
 @app.route("/")
 def index():
     return redirect("/apidocs")

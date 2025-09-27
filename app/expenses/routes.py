@@ -1,10 +1,10 @@
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from decimal import Decimal
 from datetime import date
-from ..db import get_db_connection  # helper function from app package
-from . import expenses_bp
+from app.utils import get_db_connection  # absolute import
 
+expenses_bp = Blueprint("expenses", __name__, url_prefix="/expenses")
 @expenses_bp.route("", methods=["POST"])
 @jwt_required()
 def create_expense():

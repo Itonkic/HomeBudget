@@ -1,9 +1,8 @@
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
-from app.db import get_db_connection
-from . import categories_bp
- 
- 
+from app.utils import get_db_connection  # absolute import
+
+categories_bp = Blueprint("categories", __name__, url_prefix="/categories")
  
 
 

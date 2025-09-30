@@ -1,14 +1,11 @@
-from flask import request, jsonify
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import date, timedelta, datetime
+from datetime import date, datetime, timedelta
 import random, string
+from app.utils import PASSWORD_RULES, validate_password, apply_monthly_payday, send_email, admin_required, get_db_connection
 
-from . import users_bp  # import the blueprint
-from ..db import get_db_connection  # adjust import to your DB helper
-from ..utils import validate_password, apply_monthly_payday, send_email  # adjust imports
-from ..config import PASSWORD_RULES
-
+users_bp = Blueprint("users", __name__)
 
 
 @users_bp.route("/me", methods=["GET"])
@@ -76,7 +73,7 @@ def me():
         "salary": salary,
         "message": "You are authenticated!"
     })
- 
+
 @users_bp.route("/request-password-reset", methods=["POST"])
 def request_password_reset():
     """
@@ -157,7 +154,15 @@ def request_password_reset():
     send_email(email, "Password Reset Code", f"Your password reset code is: {code}")
 
     return jsonify({"message": "Reset code sent to your email"}), 200
-
+    
+    
+    
+    
+    
+    
+    
+    
+    
 @users_bp.route("/verify-reset-code", methods=["POST"])
 def verify_reset_code():
     """
@@ -266,9 +271,7 @@ def verify_reset_code():
     return jsonify({"message": "Password reset successfully"}), 200
 
 
-
-
-@users_bp.route("", methods=["GET"])
+@users_bp.route("/", methods=["GET"])
 @jwt_required()
 @admin_required
 def get_users():

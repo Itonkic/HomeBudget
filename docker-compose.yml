@@ -1,14 +1,21 @@
+version: "3.9"
+
 services:
   web:
-    build: ./app
+    build: .
     container_name: flask_app
     ports:
       - "5000:5000"
     environment:
+      FLASK_APP: app.app:app
+      FLASK_RUN_HOST: 0.0.0.0
+      FLASK_RUN_PORT: 5000
+      FLASK_ENV: development
       POSTGRES_HOST: db
       POSTGRES_DB: home_budget
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      JWT_SECRET_KEY: super-secret
     depends_on:
       - db
 
@@ -24,7 +31,7 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./db_init:/docker-entrypoint-initdb.d   # <-- mount folder instead of single file
+      - ./db_init:/docker-entrypoint-initdb.d
 
   pgadmin:
     image: dpage/pgadmin4:latest

@@ -1,10 +1,10 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
-from app.utils import get_db_connection, admin_required
+from app.utils import get_db_connection, admin_required  # absolute import
 
-tba_sio_bp = Blueprint("tba_sio", __name__, url_prefix="/api/tba_sio")
+sio_bp = Blueprint("tba_sio", __name__, url_prefix="/tba_sio")
 
-@tba_sio_bp.route("", methods=["POST"])
+@sio_bp.route("", methods=["POST"])
 @jwt_required()
 @admin_required
 def create_tba_sio():
@@ -85,7 +85,7 @@ def create_tba_sio():
 
     return jsonify({"key": key, "value": value}), 201
 
-@tba_sio_bp.route("", methods=["GET"])
+@sio_bp.route("", methods=["GET"])
 @jwt_required()
 @admin_required
 def get_all_tba_sio():
@@ -122,10 +122,10 @@ def get_all_tba_sio():
     conn.close()
     return jsonify(entries)
 
-@tba_sio_bp.route("/<string:key>", methods=["GET"])
+@sio_bp.route("/<string:key>", methods=["GET"])
 @jwt_required()
 @admin_required
-def get_tba_sio(key):
+def get_tba_sio(key):
     """
     Get a tba_sio entry by key
     ---
@@ -149,7 +149,7 @@ def get_all_tba_sio():
         return jsonify({"error": "Key not found"}), 404
     return jsonify({"key": row[0], "value": float(row[1])})
 
-@tba_sio_bp.route("/<string:key>", methods=["PUT"])
+@sio_bp.route("/<string:key>", methods=["PUT"])
 @jwt_required()
 @admin_required
 def update_tba_sio(key):
@@ -226,7 +226,7 @@ def update_tba_sio(key):
     conn.close()
     return jsonify({"key": key, "value": value})
 
-@tba_sio_bp.route("/<string:key>", methods=["DELETE"])
+@sio_bp.route("/<string:key>", methods=["DELETE"])
 @jwt_required()
 @admin_required
 def delete_tba_sio(key):

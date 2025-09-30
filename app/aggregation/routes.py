@@ -1,8 +1,10 @@
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.aggregation import aggregation_bp
-from app.utils import get_db_connection
+from app.utils import get_db_connection  # absolute import
 from datetime import date
+
+aggregation_bp = Blueprint("aggregation", __name__, url_prefix="/aggregation")
+
 
 @aggregation_bp.route("/", methods=["GET"])
 @jwt_required()

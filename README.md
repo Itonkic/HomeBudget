@@ -38,25 +38,54 @@ It uses PostgreSQL as the database and runs inside Docker containers for easy se
 
 ```text
 📂 HomeBudget
-│
-├── app/ # Flask application
-│ ├── static/ # Static files (CSS, JS, images)
-│ ├── templates/ # HTML templates
-│ ├── app.py # Flask entrypoint
-│ ├── main.py # Additional Flask logic
-│ ├── budget.db # Local SQLite (legacy, not used in Docker)
-│ ├── Dockerfile # Dockerfile for Flask app
-│ └── requirements.txt # Python dependencies
-│
-├── db_init/ # Database initialization
-│ └── init.sql # SQL script to bootstrap database
-│
-├── docker-compose.yml # Docker Compose configuration
-├── .gitignore # Git ignore rules
-├── README.md # Project documentation
-├── test.py # Example/test script
-└── tests.txt # Test cases
+.gitignore
+CACHED
+Dockerfile
+├─ README.md
+├─ [auth]
+├─ [internal]
+├─ app
+│  ├─ .static
+index.html
+__init__.py
+aggregation
+__init__.py
+routes.py
+app.py
+│  ├─ auth
+│  │  ├─ __init__.py
+│  │  └─ routes.py
+│  ├─ categories
+│  │  ├─ __init__.py
+│  │  └─ routes.py
+expenses
+│  │  ├─ __init__.py
+routes.py
+static
+│  │  └─ index.html
+│  ├─ tba_sio
+│  │  ├─ __init__.py
+│  │  └─ routes.py
+│  ├─ templates
+│  │  ├─ categories.html
+│  │  ├─ expenses.html
+│  │  └─ index.html
+│  ├─ users
+│  │  ├─ __init__.py
+│  │  └─ routes.py
+│  └─ utils.py
+├─ curl
+db_init
+│  └─ init.sql
+├─ docker
+├─ docker-compose.yml
+├─ exporting
+├─ requirements.txt
+├─ resolving
+├─ test.py
+└─ tests.txt
 ```
+
 
 ```text
 🚀 Getting Started

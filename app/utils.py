@@ -1,5 +1,3 @@
-# app/utils.py
-
 import re
 import os
 import psycopg2
